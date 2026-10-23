@@ -12,6 +12,7 @@
 #include "audio_stream.h"
 #include "gfx.h"
 #include "text_view.h"
+#include "streamdeck.h"
 #include "voice.h"
 #include "widgets.h"
 #include "wifi.h"
@@ -46,7 +47,7 @@ static uint64_t g_backoff_until;
 static uint64_t g_reconnect_started;
 static int g_forget_armed;
 
-enum screen { SCR_WIDGETS, SCR_STATUS, SCR_SPEAKER, SCR_ASSISTANT };
+enum screen { SCR_WIDGETS, SCR_STATUS, SCR_SPEAKER, SCR_ASSISTANT, SCR_DECK };
 static enum screen g_screen = SCR_WIDGETS;
 static int g_menu_open, g_menu_sel;
 
@@ -252,6 +253,7 @@ static void screen_connecting(void)
         widgets_reset();
         audio_reset();
         voice_reset();
+        deck_reset();
     } else if (rc == NET_ERR_UNPAIRED) {
         forget_pairing(err);
     } else {
@@ -272,16 +274,17 @@ static void fmt_bytes(char *out, size_t cap, uint64_t b)
 
 static void on_message(const uint8_t *m, size_t len)
 {
-    if (!widgets_on_message(m, len) && !audio_on_message(m, len)) voice_on_message(m, len);
+    if (!widgets_on_message(m, len) && !audio_on_message(m, len) && !deck_on_message(m, len)) voice_on_message(m, len);
 }
 
-enum menu_item { MENU_WIDGETS, MENU_ASSISTANT, MENU_SPEAKER, MENU_STATUS, MENU_WIFI, MENU_COUNT };
+enum menu_item { MENU_WIDGETS, MENU_ASSISTANT, MENU_DECK, MENU_SPEAKER, MENU_STATUS, MENU_WIFI, MENU_COUNT };
 
 static const char *menu_label(int item)
 {
     switch (item) {
     case MENU_WIDGETS: return "Screen (widgets and macros)";
     case MENU_ASSISTANT: return "Assistant (hold R to talk)";
+    case MENU_DECK: return "Stream Deck (Bitfocus Companion)";
     case MENU_STATUS: return "Connection status";
     case MENU_SPEAKER: return "PC speaker";
     case MENU_WIFI: return "Wi-Fi network";
@@ -356,6 +359,7 @@ static void menu_screen(uint32_t pressed)
         switch (g_menu_sel) {
         case MENU_WIDGETS: g_screen = SCR_WIDGETS; break;
         case MENU_ASSISTANT: g_screen = SCR_ASSISTANT; break;
+        case MENU_DECK: g_screen = SCR_DECK; break;
         case MENU_STATUS: g_screen = SCR_STATUS; break;
         case MENU_SPEAKER: g_screen = SCR_SPEAKER; break;
         case MENU_WIFI:
@@ -387,6 +391,7 @@ static void screen_connected(uint32_t pressed)
         set_msg(net_get_stats()->status);
         audio_reset();
         voice_reset();
+        deck_reset();
         if (rc == NET_ERR_UNPAIRED) {
             forget_pairing(net_get_stats()->status);
         } else if (!wifi_has_ip()) {
@@ -399,6 +404,7 @@ static void screen_connected(uint32_t pressed)
     }
     if (pressed & PSP_CTRL_START) {
         g_menu_open = !g_menu_open;
+        deck_release();
         return;
     }
     if (g_menu_open) {
@@ -406,6 +412,14 @@ static void screen_connected(uint32_t pressed)
         return;
     }
     voice_poll();
+    if (g_screen == SCR_DECK) {
+        uint64_t now = net_now_us();
+        deck_input(pressed, ui_pad_state(), now);
+        ui_begin();
+        deck_draw(now);
+        ui_end();
+        return;
+    }
     if (g_screen == SCR_ASSISTANT) {
         assistant_screen(pressed);
         return;

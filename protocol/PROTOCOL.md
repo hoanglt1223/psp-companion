@@ -395,6 +395,28 @@ the PC speaker.
 - Conversation history (the last 10 exchanges by default) is kept on the host
   per paired PSP, across reconnects, until the host restarts.
 
+
+## Stream Deck mode (phase 06)
+
+The host connects to Bitfocus Companion's Satellite API (TCP, default port
+16622; API versions 1.5 to 1.x) and registers each connected PSP as a 6x3
+surface in simple mode with square bitmaps (`BITMAPS=76` by default).
+
+- `DeckLayout` is sent after `HelloAck` and whenever Companion connects or
+  disconnects. `columns` and `rows` 0 mean Companion is not reachable; the PSP
+  then offers its own macro pad.
+- `DeckKeyImage` uses image format 1 (`IDX8_LZ4`, see
+  [Widgets](#widgetasset-format-1-and-image-format-1-idx8_lz4)). `key` is
+  0-17, row by row. Empty `data` means "show the image you already have under
+  `image_id`"; the PSP keeps decoded images by ID for the session.
+- Only changed keys are sent. At most one new image (with data) goes out per
+  200 ms per PSP (5 per second); updates that reuse a cached image are not
+  limited. A key that changes more than 3 times within 2 seconds (an animation)
+  is held until it has been unchanged for 2 seconds, then its last frame is sent.
+- `DeckKeyPress` press and release are separate messages, so Companion sees
+  long presses. Keys 254 and 255 (pressed only) switch to the previous and next
+  Companion page (API 1.10 and later; older servers ignore them).
+
 ## Timers
 
 | Timer | Value | Owner |

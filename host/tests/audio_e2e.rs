@@ -101,6 +101,7 @@ async fn setup(script: Vec<(f32, f32)>, speedup: u32) -> (Host, Psp, AudioHandle
     let host = start_host(&format!("audio-{speedup}-{}", script.len())).await;
     let mut cfg = host.state.config();
     cfg.widgets.enabled = false;
+    cfg.streamdeck.enabled = false;
     let events = host.state.subscribe_events();
     let backends = Backends {
         exec: Arc::new(NoActions),

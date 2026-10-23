@@ -254,6 +254,18 @@ size_t pspc_build_voice_end(uint8_t *out, uint32_t utterance_id, uint8_t reason)
 int pspc_parse_voice_text(const uint8_t *buf, size_t len, uint8_t *type, uint32_t *utterance_id, uint8_t *is_final,
                           char *text, size_t text_cap);
 
+/* ---------- Stream Deck mode (phase 06) ---------- */
+
+#define PSPC_DECK_KEY_PAGE_PREV 254
+#define PSPC_DECK_KEY_PAGE_NEXT 255
+
+int pspc_parse_deck_layout(const uint8_t *buf, size_t len, uint8_t *columns, uint8_t *rows, uint8_t *key_w,
+                           uint8_t *key_h);
+/* *data points into buf; data_len 0 means "reuse the cached image_id". */
+int pspc_parse_deck_key_image(const uint8_t *buf, size_t len, uint8_t *key, uint64_t *image_id, uint8_t *format,
+                              uint8_t *width, uint8_t *height, const uint8_t **data, size_t *data_len);
+size_t pspc_build_deck_key_press(uint8_t *out, uint8_t key, uint8_t pressed);
+
 /* Little-endian helpers used by the network code. */
 static inline void pspc_put16(uint8_t *p, uint16_t v)
 {

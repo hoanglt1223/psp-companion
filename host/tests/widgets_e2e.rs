@@ -67,6 +67,7 @@ async fn widgets_macros_and_taps() {
     let host = start_host("widgets").await;
     let mut cfg = host.state.config();
     cfg.widgets.now_playing = false;
+    cfg.streamdeck.enabled = false;
     cfg.widgets.ingest_port = 0;
     cfg.widgets.system_interval_secs = 60;
     let rec = Arc::new(Recorder::default());

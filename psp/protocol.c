@@ -509,3 +509,41 @@ int pspc_parse_voice_text(const uint8_t *buf, size_t len, uint8_t *type, uint32_
     rd_str(&r, rd_u16(&r), text, text_cap);
     return rd_done(&r);
 }
+
+/* ---------- Stream Deck mode ---------- */
+
+int pspc_parse_deck_layout(const uint8_t *buf, size_t len, uint8_t *columns, uint8_t *rows, uint8_t *key_w,
+                           uint8_t *key_h)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_DECK_LAYOUT) != PSPC_OK) return PSPC_EMALFORMED;
+    *columns = rd_u8(&r);
+    *rows = rd_u8(&r);
+    *key_w = rd_u8(&r);
+    *key_h = rd_u8(&r);
+    return rd_done(&r);
+}
+
+int pspc_parse_deck_key_image(const uint8_t *buf, size_t len, uint8_t *key, uint64_t *image_id, uint8_t *format,
+                              uint8_t *width, uint8_t *height, const uint8_t **data, size_t *data_len)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_DECK_KEY_IMAGE) != PSPC_OK) return PSPC_EMALFORMED;
+    *key = rd_u8(&r);
+    *image_id = rd_u64(&r);
+    *format = rd_u8(&r);
+    *width = rd_u8(&r);
+    *height = rd_u8(&r);
+    if (r.err) return PSPC_EMALFORMED;
+    *data = r.p;
+    *data_len = r.n;
+    return PSPC_OK;
+}
+
+size_t pspc_build_deck_key_press(uint8_t *out, uint8_t key, uint8_t pressed)
+{
+    out[0] = PSPC_MSG_DECK_KEY_PRESS;
+    out[1] = key;
+    out[2] = pressed ? 1 : 0;
+    return 3;
+}

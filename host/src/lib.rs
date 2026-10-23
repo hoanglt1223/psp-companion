@@ -9,6 +9,7 @@ pub mod macros;
 pub mod net;
 pub mod pairing;
 pub mod state;
+pub mod streamdeck;
 pub mod tray;
 pub mod voice;
 pub mod widgets;

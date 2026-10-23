@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::macros::MacroRunner;
 use crate::net::message::Message;
 use crate::state::{AppState, HostEvent};
+use crate::streamdeck::bridge::{BridgeCmd, BridgeHandle, spawn_bridge};
 use crate::voice::session::{Engines, VoiceService};
 use crate::widgets::layout::Layout;
 use crate::widgets::{self, HubCmd, WidgetHandle};
@@ -31,6 +32,7 @@ pub struct Features {
     pub macros: MacroRunner,
     pub audio: AudioHandle,
     pub voice: VoiceService,
+    pub deck: Option<BridgeHandle>,
 }
 
 impl Features {
@@ -64,7 +66,8 @@ impl Features {
         };
         let audio = stream::spawn_manager(state.clone(), backends.capture);
         let voice = VoiceService::new(state.clone(), audio.clone(), &config.voice, Engines::from_config(&config.voice));
-        Self { layout, widgets, macros: MacroRunner::new(config.macros.clone(), backends.exec), audio, voice }
+        let deck = config.streamdeck.enabled.then(|| spawn_bridge(state.clone(), config.streamdeck.clone()));
+        Self { layout, widgets, macros: MacroRunner::new(config.macros.clone(), backends.exec), audio, voice, deck }
     }
 
     async fn on_message(&mut self, device: crate::net::handshake::Id16, msg: Message) {
@@ -83,6 +86,11 @@ impl Features {
             Message::AudioStreamStop { stream_id, .. } => {
                 self.audio.send(AudioCmd::PspStop { device, stream_id }).await;
             }
+            Message::DeckKeyPress { key, pressed } => {
+                if let Some(d) = &self.deck {
+                    d.send(BridgeCmd::KeyPress(device, key, pressed)).await;
+                }
+            }
             m @ (Message::VoiceStart { .. } | Message::VoiceChunk { .. } | Message::VoiceEnd { .. }) => {
                 self.voice.on_message(device, m).await;
             }
@@ -98,6 +106,9 @@ pub async fn run(mut events: mpsc::Receiver<HostEvent>, mut features: Features) 
                 info!(device = %name, "PSP connected");
                 features.audio.send(AudioCmd::SessionUp { device, session_id }).await;
                 features.voice.session_up(device, session_id);
+                if let Some(d) = &features.deck {
+                    d.send(BridgeCmd::SessionUp(device, session_id)).await;
+                }
                 if let Some(w) = &features.widgets {
                     w.send(HubCmd::SessionUp(device, session_id)).await;
                 }
@@ -105,6 +116,9 @@ pub async fn run(mut events: mpsc::Receiver<HostEvent>, mut features: Features) 
             HostEvent::SessionDown { device, session_id } => {
                 features.audio.send(AudioCmd::SessionDown { device, session_id }).await;
                 features.voice.session_down(device, session_id);
+                if let Some(d) = &features.deck {
+                    d.send(BridgeCmd::SessionDown(device, session_id)).await;
+                }
                 if let Some(w) = &features.widgets {
                     w.send(HubCmd::SessionDown(device, session_id)).await;
                 }

@@ -309,3 +309,27 @@ unsafe extern "C" {
         cap: usize,
     ) -> c_int;
 }
+
+// Phase 06: Stream Deck.
+unsafe extern "C" {
+    pub fn pspc_parse_deck_layout(
+        buf: *const u8,
+        len: usize,
+        columns: *mut u8,
+        rows: *mut u8,
+        key_w: *mut u8,
+        key_h: *mut u8,
+    ) -> c_int;
+    pub fn pspc_parse_deck_key_image(
+        buf: *const u8,
+        len: usize,
+        key: *mut u8,
+        image_id: *mut u64,
+        format: *mut u8,
+        width: *mut u8,
+        height: *mut u8,
+        data: *mut *const u8,
+        data_len: *mut usize,
+    ) -> c_int;
+    pub fn pspc_build_deck_key_press(out: *mut u8, key: u8, pressed: u8) -> usize;
+}

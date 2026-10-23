@@ -110,6 +110,7 @@ async fn start_api(api: Arc<Api>) -> String {
 
 fn voice_config(base: &str, cfg: &mut Config) {
     cfg.widgets.enabled = false;
+    cfg.streamdeck.enabled = false;
     let v = &mut cfg.voice;
     v.api_base = base.to_string();
     v.api_key = companion_host::voice::Secret(KEY.into());

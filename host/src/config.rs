@@ -69,6 +69,8 @@ pub struct Config {
     pub audio: AudioConfig,
     #[serde(default)]
     pub voice: crate::voice::VoiceConfig,
+    #[serde(default)]
+    pub streamdeck: crate::streamdeck::satellite::StreamDeckConfig,
     #[serde(default = "crate::macros::default_macros")]
     pub macros: Vec<MacroSlot>,
 }
@@ -178,6 +180,7 @@ impl Config {
             widgets: WidgetsConfig::default(),
             audio: AudioConfig::default(),
             voice: crate::voice::VoiceConfig::default(),
+            streamdeck: crate::streamdeck::satellite::StreamDeckConfig::default(),
             macros: crate::macros::default_macros(),
         }
     }
@@ -205,6 +208,7 @@ impl Config {
         }
         self.widgets.validate()?;
         self.voice.validate().map_err(ConfigError::Invalid)?;
+        self.streamdeck.validate().map_err(ConfigError::Invalid)?;
         crate::macros::validate(&self.macros).map_err(ConfigError::Invalid)?;
         for (i, d) in self.devices.iter().enumerate() {
             if self.devices[..i].iter().any(|o| o.id == d.id) {

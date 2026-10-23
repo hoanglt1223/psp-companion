@@ -6,8 +6,8 @@ Turns a PSP-3000 (ARK-4 CFW) into a low-bandwidth Wi-Fi companion for a PC. Two 
 - `psp/`: **companion-psp** (C, pspsdk), runs on the PSP. Wi-Fi, discovery, pairing, status screen.
 
 The wire protocol is specified in [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md). Current state: protocol, pairing,
-encrypted channels, the secondary screen (widgets, cursor, macro pad), the PC speaker, and the Claude voice assistant.
-Stream Deck mode follows.
+encrypted channels, the secondary screen (widgets, cursor, macro pad), the PC speaker, the Claude voice assistant,
+and Stream Deck mode (Bitfocus Companion Satellite surface).
 
 ## Wi-Fi budget
 
@@ -25,6 +25,7 @@ screen shows live in/out throughput against that budget.
 | `host/src/config.rs`, `state.rs`, `tray.rs` | Config file, shared state, tray UI |
 | `host/tests/e2e.rs` | Drives the real server over localhost as a PSP would |
 | `psp/` | PSP client: `main.c` (state machine and screens), `net.c`, `wifi.c`, `ui.c`, `crypto.c`, `protocol.c`, `rng.c`, `storage.c` |
+| `host/src/streamdeck/` | Bitfocus Companion Satellite client and the PSP key bridge |
 | `host/src/voice/` | ADPCM, mic cleanup, whisper.cpp / hosted STT, Claude streaming client, Piper / hosted TTS, sessions |
 | `host/src/audio/` | Loopback capture, MP3 encoding, stream manager (one stream per PSP) |
 | `host/src/widgets/`, `macros.rs`, `actions/`, `imaging.rs`, `app.rs` | Widget hub and sources, macro slots, desktop actions, IDX8-LZ4 images, feature router |
@@ -89,6 +90,10 @@ Built with the pspdev toolchain in Docker, so it works from Windows:
 
 Both run `make` in `psp/` inside `pspdev/pspdev:latest` (override with `PSPDEV_IMAGE`). Copy `psp/EBOOT.PBP` to
 `ms0:/PSP/GAME/PSPCompanion/EBOOT.PBP`. The pairing record is saved as `pairing.dat` next to the EBOOT.
+
+Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which tests and builds the Windows host, builds the
+EBOOT with the same Docker command, and attaches `companion-host-<tag>-windows-x64.exe` and
+`psp-companion-<tag>-psp.zip` (unzip onto the Memory Stick root) to a GitHub Release.
 
 On the PSP:
 
@@ -181,6 +186,27 @@ piper_voice_en = 'C:\tools\piper\en_US-amy-medium.onnx'
 The host cleans the microphone signal (high-pass, noise gate, normalisation) before speech-to-text, and reports
 problems on the PSP in plain words (no key, rate limited, overloaded, no speech heard). Tests that need whisper.cpp
 or Piper run only when `PSPC_WHISPER_BIN`/`PSPC_WHISPER_MODEL` or `PSPC_PIPER_BIN`/`PSPC_PIPER_VOICE` are set.
+
+## Stream Deck mode (Bitfocus Companion)
+
+With [Bitfocus Companion](https://bitfocus.io/companion) running on the PC (Satellite API 1.5 to 1.x, Companion 3.2
+or later; page switching needs 4.3 or later), each connected PSP appears in Companion's Surfaces list as a 6x3
+"PSP Companion" surface. START menu, **Stream Deck**: D-pad or the nub selects, X presses (held keys stay held, so
+long presses work), L/R switch Companion pages, Triangle opens the built-in macro pad. Any Companion integration
+works (OBS scene switching, Spotify, vMix, Home Assistant, hotkeys).
+
+Key images are 76x76, palettised and compressed (a flat button is a few hundred bytes), cached on the PSP by ID, and
+only changed keys are sent: at most 5 new images per second, while keys the PSP already has (flipping back to a
+page) cost a few bytes each. Animated keys are shown as a still frame. When Companion is not running, the screen says
+so and the macro pad remains available.
+
+```toml
+[streamdeck]
+enabled = true
+host = "127.0.0.1"   # the PC running Companion
+port = 16622         # Companion's Satellite TCP port
+bitmap_size = 76     # 32-96
+```
 
 ## PC speaker
 

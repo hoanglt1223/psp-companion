@@ -493,6 +493,7 @@ name = "companion-host"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "chacha20poly1305",
  "chrono",
  "color_quant",
@@ -2638,6 +2639,7 @@ dependencies = [
  "hmac",
  "lz4_flex",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
