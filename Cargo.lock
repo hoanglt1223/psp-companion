@@ -488,6 +488,7 @@ dependencies = [
  "tray-icon",
  "unicode-normalization",
  "windows",
+ "windows-future",
  "winit",
 ]
 
@@ -2439,6 +2440,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pspc-fontgen"
+version = "0.1.0"
+
+[[package]]
 name = "pspc-xcheck"
 version = "0.1.0"
 dependencies = [
@@ -2448,6 +2453,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "lz4_flex",
  "sha2",
 ]
 

@@ -65,6 +65,14 @@ int net_session_poll(void);
 void net_session_ping_now(void);
 void net_session_close(uint8_t bye_reason);
 
+/* Queues one plaintext message on the control channel (sent by the next net_session_poll).
+ * Returns 0, or -1 when not connected or the send queue is full. */
+int net_send(const uint8_t *msg, size_t len);
+
+/* Receives every control message the network layer does not handle itself (widgets, voice, deck). */
+typedef void (*net_message_fn)(const uint8_t *msg, size_t len);
+void net_set_message_handler(net_message_fn fn);
+
 const net_stats *net_get_stats(void);
 /* Updates the per-second throughput figures; call once per frame. */
 void net_stats_tick(void);

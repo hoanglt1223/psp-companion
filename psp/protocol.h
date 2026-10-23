@@ -112,6 +112,110 @@ int pspc_parse_bye(const uint8_t *buf, size_t len, uint8_t *reason);
 /* text is truncated to text_cap - 1 bytes and NUL-terminated. */
 int pspc_parse_error(const uint8_t *buf, size_t len, uint16_t *code, char *text, size_t text_cap);
 
+/* ---------- Widgets (phase 03) ---------- */
+
+#define PSPC_FORMAT_BINARY 1
+#define PSPC_INPUT_TAP 0
+
+#define PSPC_MAX_PAGES 3
+#define PSPC_MAX_WIDGETS 16
+#define PSPC_MAX_MACROS 12
+
+enum pspc_widget_kind {
+    PSPC_W_CLOCK = 1,
+    PSPC_W_SYSTEM = 2,
+    PSPC_W_NOW_PLAYING = 3,
+    PSPC_W_NOTIFICATIONS = 4,
+    PSPC_W_CALENDAR = 5,
+    PSPC_W_CLAUDE_CODE = 6
+};
+
+#define PSPC_WIDGET_TAPPABLE 0x01
+#define PSPC_TEMP_UNKNOWN (-32768)
+#define PSPC_PCT_UNKNOWN 255
+
+typedef struct {
+    uint16_t id;
+    uint8_t kind;
+    uint8_t page;
+    uint16_t x, y, w, h;
+    uint8_t flags;
+    char title[33];
+} pspc_widget_def;
+
+typedef struct {
+    uint8_t page_count;
+    char pages[PSPC_MAX_PAGES][25];
+    uint8_t widget_count;
+    pspc_widget_def widgets[PSPC_MAX_WIDGETS];
+    uint8_t macro_count;
+    struct {
+        uint8_t slot;
+        char label[25];
+    } macros[PSPC_MAX_MACROS];
+} pspc_layout;
+
+typedef struct {
+    uint8_t cpu_pct, gpu_pct;
+    uint32_t ram_used_mb, ram_total_mb;
+    int16_t cpu_temp, gpu_temp; /* tenths of a degree, PSPC_TEMP_UNKNOWN */
+} pspc_w_system;
+
+typedef struct {
+    uint8_t state; /* 0 nothing, 1 playing, 2 paused, 3 stopped */
+    uint64_t cover;
+    char title[97];
+    char artist[65];
+} pspc_w_now_playing;
+
+typedef struct {
+    uint8_t count;
+    struct {
+        char app[33], title[65], body[161], time[17];
+    } items[5];
+} pspc_w_notifications;
+
+typedef struct {
+    uint8_t has_event;
+    char title[97];
+    char when[33];
+} pspc_w_calendar;
+
+typedef struct {
+    uint8_t count;
+    struct {
+        char project[41];
+        uint8_t state; /* 0 idle, 1 working, 2 waiting, 3 done */
+        char detail[65];
+    } items[4];
+} pspc_w_claude;
+
+typedef struct {
+    uint8_t kind;
+    union {
+        pspc_w_system system;
+        pspc_w_now_playing now;
+        pspc_w_notifications notes;
+        pspc_w_calendar calendar;
+        pspc_w_claude claude;
+    } u;
+} pspc_widget_value;
+
+/* Envelopes: *data points into buf (the `rest` field). */
+int pspc_parse_widget_layout(const uint8_t *buf, size_t len, uint8_t *format, const uint8_t **data,
+                             size_t *data_len);
+int pspc_parse_widget_data(const uint8_t *buf, size_t len, uint16_t *widget_id, uint8_t *format,
+                           const uint8_t **data, size_t *data_len);
+int pspc_parse_widget_asset(const uint8_t *buf, size_t len, uint64_t *asset_id, uint8_t *format,
+                            const uint8_t **data, size_t *data_len);
+/* Format 1 bodies. */
+int pspc_parse_layout(const uint8_t *data, size_t len, pspc_layout *out);
+int pspc_parse_widget_value(uint8_t kind, const uint8_t *data, size_t len, pspc_widget_value *out);
+
+size_t pspc_build_input_event(uint8_t *out, uint8_t kind, uint8_t page, uint16_t widget_id, uint16_t x, uint16_t y,
+                              uint32_t buttons);
+size_t pspc_build_macro_trigger(uint8_t *out, uint8_t slot);
+
 /* Little-endian helpers used by the network code. */
 static inline void pspc_put16(uint8_t *p, uint16_t v)
 {

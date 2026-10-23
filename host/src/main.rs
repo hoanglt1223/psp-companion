@@ -2,11 +2,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use companion_host::app;
 use companion_host::config::{Config, Paths};
 use companion_host::net::message::ByeReason;
 use companion_host::net::server::{self, Listeners};
 use companion_host::state::AppState;
 use companion_host::tray;
+use companion_host::widgets::layout::Layout;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -104,6 +106,13 @@ fn run(args: Args, paths: Paths) -> Result<(), String> {
         budget_kbps = config.network.budget_kbps,
         "listening"
     );
+    let layout_path = config.widgets.layout_path(&paths.config_file);
+    let layout = Layout::load_or_create(&layout_path)?;
+    let events = state.subscribe_events();
+    let features =
+        runtime.block_on(app::Features::start(&state, &config, layout, companion_host::actions::system_executor()));
+    runtime.spawn(app::run(events, features));
+
     let server_state = state.clone();
     let server = runtime.spawn(async move {
         if let Err(e) = server::run(server_state, listeners).await {

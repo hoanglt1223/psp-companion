@@ -9,6 +9,7 @@
 #include "rng.h"
 #include "storage.h"
 #include "ui.h"
+#include "widgets.h"
 #include "wifi.h"
 
 PSP_MODULE_INFO("PSP Companion", PSP_MODULE_USER, 0, 1);
@@ -40,6 +41,10 @@ static int g_failures;
 static uint64_t g_backoff_until;
 static uint64_t g_reconnect_started;
 static int g_forget_armed;
+
+enum screen { SCR_WIDGETS, SCR_STATUS };
+static enum screen g_screen = SCR_WIDGETS;
+static int g_menu_open, g_menu_sel;
 
 static int exit_callback(int arg1, int arg2, void *common)
 {
@@ -239,6 +244,8 @@ static void screen_connecting(void)
         g_forget_armed = 0;
         g_msg[0] = '\0';
         g_state = ST_CONNECTED;
+        g_menu_open = 0;
+        widgets_reset();
     } else if (rc == NET_ERR_UNPAIRED) {
         forget_pairing(err);
     } else {
@@ -255,6 +262,52 @@ static void fmt_bytes(char *out, size_t cap, uint64_t b)
         snprintf(out, cap, "%u KB", (unsigned)(b / 1024));
     else
         snprintf(out, cap, "%u MB", (unsigned)(b / (1024 * 1024)));
+}
+
+static void on_message(const uint8_t *m, size_t len)
+{
+    widgets_on_message(m, len);
+}
+
+enum menu_item { MENU_WIDGETS, MENU_STATUS, MENU_WIFI, MENU_COUNT };
+
+static const char *menu_label(int item)
+{
+    switch (item) {
+    case MENU_WIDGETS: return "Screen (widgets and macros)";
+    case MENU_STATUS: return "Connection status";
+    case MENU_WIFI: return "Wi-Fi network";
+    default: return "";
+    }
+}
+
+static void menu_screen(uint32_t pressed)
+{
+    int i;
+    if (pressed & PSP_CTRL_UP) g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
+    if (pressed & PSP_CTRL_DOWN) g_menu_sel = (g_menu_sel + 1) % MENU_COUNT;
+    if (pressed & PSP_CTRL_CIRCLE) g_menu_open = 0;
+    if (pressed & PSP_CTRL_CROSS) {
+        g_menu_open = 0;
+        switch (g_menu_sel) {
+        case MENU_WIDGETS: g_screen = SCR_WIDGETS; break;
+        case MENU_STATUS: g_screen = SCR_STATUS; break;
+        case MENU_WIFI:
+            net_session_close(PSPC_BYE_NORMAL);
+            g_state = ST_WIFI_DIALOG;
+            break;
+        default: break;
+        }
+        return;
+    }
+    ui_begin();
+    header();
+    ui_text(1, 4, UI_WHITE, "Menu");
+    for (i = 0; i < MENU_COUNT; i++)
+        ui_text(3, 6 + i * 2, i == g_menu_sel ? UI_GREEN : UI_WHITE, "%c %s", i == g_menu_sel ? '>' : ' ',
+                menu_label(i));
+    footer("X Select   O Back   START Close   HOME Quit");
+    ui_end();
 }
 
 static void screen_connected(uint32_t pressed)
@@ -276,12 +329,24 @@ static void screen_connected(uint32_t pressed)
         }
         return;
     }
-    if (pressed & PSP_CTRL_SQUARE) net_session_ping_now();
     if (pressed & PSP_CTRL_START) {
-        net_session_close(PSPC_BYE_NORMAL);
-        g_state = ST_WIFI_DIALOG;
+        g_menu_open = !g_menu_open;
         return;
     }
+    if (g_menu_open) {
+        menu_screen(pressed);
+        return;
+    }
+    if (g_screen == SCR_WIDGETS) {
+        uint64_t now = net_now_us();
+        widgets_input(pressed, ui_pad_state(), now);
+        ui_begin();
+        widgets_draw(now);
+        ui_end();
+        return;
+    }
+
+    if (pressed & PSP_CTRL_SQUARE) net_session_ping_now();
     if (pressed & PSP_CTRL_SELECT) {
         if (g_forget_armed) {
             net_session_close(PSPC_BYE_NORMAL);
@@ -320,7 +385,7 @@ static void screen_connected(uint32_t pressed)
     ui_text(1, 16, UI_WHITE, "Audio UDP  %s   packets %u   dropped %u", s->udp_registered ? "ready" : "registering",
             (unsigned)s->udp_packets, (unsigned)s->udp_dropped);
     ui_text(1, 17, UI_GREY, "Keepalive  every %u s; data is pushed by the PC only on change", (unsigned)s->keepalive_s);
-    footer("[] Measure RTT   SELECT Forget pairing   START Wi-Fi   HOME Quit");
+    footer("[] Measure RTT   SELECT Forget pairing   START Menu   HOME Quit");
     ui_end();
 }
 
@@ -406,6 +471,7 @@ int main(int argc, char *argv[])
         return 0;
     }
     g_paired = storage_load(&g_rec) == 0;
+    net_set_message_handler(on_message);
 
     while (g_running) {
         uint32_t pressed = ui_poll_pressed();

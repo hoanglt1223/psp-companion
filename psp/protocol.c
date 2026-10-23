@@ -261,3 +261,156 @@ int pspc_parse_error(const uint8_t *buf, size_t len, uint16_t *code, char *text,
     rd_str(&r, rd_u16(&r), text, text_cap);
     return rd_done(&r);
 }
+
+/* ---------- Widgets ---------- */
+
+static void rd_str8(reader *r, char *dst, size_t cap)
+{
+    rd_str(r, rd_u8(r), dst, cap);
+}
+
+int pspc_parse_widget_layout(const uint8_t *buf, size_t len, uint8_t *format, const uint8_t **data,
+                             size_t *data_len)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_WIDGET_LAYOUT) != PSPC_OK) return PSPC_EMALFORMED;
+    *format = rd_u8(&r);
+    if (r.err) return PSPC_EMALFORMED;
+    *data = r.p;
+    *data_len = r.n;
+    return PSPC_OK;
+}
+
+int pspc_parse_widget_data(const uint8_t *buf, size_t len, uint16_t *widget_id, uint8_t *format,
+                           const uint8_t **data, size_t *data_len)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_WIDGET_DATA) != PSPC_OK) return PSPC_EMALFORMED;
+    *widget_id = rd_u16(&r);
+    *format = rd_u8(&r);
+    if (r.err) return PSPC_EMALFORMED;
+    *data = r.p;
+    *data_len = r.n;
+    return PSPC_OK;
+}
+
+int pspc_parse_widget_asset(const uint8_t *buf, size_t len, uint64_t *asset_id, uint8_t *format,
+                            const uint8_t **data, size_t *data_len)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_WIDGET_ASSET) != PSPC_OK) return PSPC_EMALFORMED;
+    *asset_id = rd_u64(&r);
+    *format = rd_u8(&r);
+    if (r.err) return PSPC_EMALFORMED;
+    *data = r.p;
+    *data_len = r.n;
+    return PSPC_OK;
+}
+
+int pspc_parse_layout(const uint8_t *data, size_t len, pspc_layout *out)
+{
+    reader r = {data, len, 0};
+    int i;
+    memset(out, 0, sizeof *out);
+    out->page_count = rd_u8(&r);
+    if (r.err || out->page_count < 1 || out->page_count > PSPC_MAX_PAGES) return PSPC_EMALFORMED;
+    for (i = 0; i < out->page_count; i++) rd_str8(&r, out->pages[i], sizeof out->pages[i]);
+    out->widget_count = rd_u8(&r);
+    if (r.err || out->widget_count > PSPC_MAX_WIDGETS) return PSPC_EMALFORMED;
+    for (i = 0; i < out->widget_count; i++) {
+        pspc_widget_def *d = &out->widgets[i];
+        d->id = rd_u16(&r);
+        d->kind = rd_u8(&r);
+        d->page = rd_u8(&r);
+        d->x = rd_u16(&r);
+        d->y = rd_u16(&r);
+        d->w = rd_u16(&r);
+        d->h = rd_u16(&r);
+        d->flags = rd_u8(&r);
+        rd_str8(&r, d->title, sizeof d->title);
+        if (r.err || d->page >= out->page_count || d->w == 0 || d->h == 0 || d->x + d->w > 480 || d->y + d->h > 272)
+            return PSPC_EMALFORMED;
+    }
+    out->macro_count = rd_u8(&r);
+    if (r.err || out->macro_count > PSPC_MAX_MACROS) return PSPC_EMALFORMED;
+    for (i = 0; i < out->macro_count; i++) {
+        out->macros[i].slot = rd_u8(&r);
+        rd_str8(&r, out->macros[i].label, sizeof out->macros[i].label);
+        if (out->macros[i].slot >= PSPC_MAX_MACROS) return PSPC_EMALFORMED;
+    }
+    return rd_done(&r);
+}
+
+int pspc_parse_widget_value(uint8_t kind, const uint8_t *data, size_t len, pspc_widget_value *out)
+{
+    reader r = {data, len, 0};
+    int i;
+    memset(out, 0, sizeof *out);
+    out->kind = kind;
+    switch (kind) {
+    case PSPC_W_SYSTEM:
+        out->u.system.cpu_pct = rd_u8(&r);
+        out->u.system.gpu_pct = rd_u8(&r);
+        out->u.system.ram_used_mb = rd_u32(&r);
+        out->u.system.ram_total_mb = rd_u32(&r);
+        out->u.system.cpu_temp = (int16_t)rd_u16(&r);
+        out->u.system.gpu_temp = (int16_t)rd_u16(&r);
+        break;
+    case PSPC_W_NOW_PLAYING:
+        out->u.now.state = rd_u8(&r);
+        out->u.now.cover = rd_u64(&r);
+        rd_str8(&r, out->u.now.title, sizeof out->u.now.title);
+        rd_str8(&r, out->u.now.artist, sizeof out->u.now.artist);
+        break;
+    case PSPC_W_NOTIFICATIONS:
+        out->u.notes.count = rd_u8(&r);
+        if (out->u.notes.count > 5) return PSPC_EMALFORMED;
+        for (i = 0; i < out->u.notes.count; i++) {
+            rd_str8(&r, out->u.notes.items[i].app, sizeof out->u.notes.items[i].app);
+            rd_str8(&r, out->u.notes.items[i].title, sizeof out->u.notes.items[i].title);
+            rd_str8(&r, out->u.notes.items[i].body, sizeof out->u.notes.items[i].body);
+            rd_str8(&r, out->u.notes.items[i].time, sizeof out->u.notes.items[i].time);
+        }
+        break;
+    case PSPC_W_CALENDAR:
+        out->u.calendar.has_event = rd_u8(&r);
+        if (out->u.calendar.has_event > 1) return PSPC_EMALFORMED;
+        if (out->u.calendar.has_event) {
+            rd_str8(&r, out->u.calendar.title, sizeof out->u.calendar.title);
+            rd_str8(&r, out->u.calendar.when, sizeof out->u.calendar.when);
+        }
+        break;
+    case PSPC_W_CLAUDE_CODE:
+        out->u.claude.count = rd_u8(&r);
+        if (out->u.claude.count > 4) return PSPC_EMALFORMED;
+        for (i = 0; i < out->u.claude.count; i++) {
+            rd_str8(&r, out->u.claude.items[i].project, sizeof out->u.claude.items[i].project);
+            out->u.claude.items[i].state = rd_u8(&r);
+            rd_str8(&r, out->u.claude.items[i].detail, sizeof out->u.claude.items[i].detail);
+        }
+        break;
+    default:
+        return PSPC_EMALFORMED;
+    }
+    return rd_done(&r);
+}
+
+size_t pspc_build_input_event(uint8_t *out, uint8_t kind, uint8_t page, uint16_t widget_id, uint16_t x, uint16_t y,
+                              uint32_t buttons)
+{
+    out[0] = PSPC_MSG_INPUT_EVENT;
+    out[1] = kind;
+    out[2] = page;
+    pspc_put16(out + 3, widget_id);
+    pspc_put16(out + 5, x);
+    pspc_put16(out + 7, y);
+    pspc_put32(out + 9, buttons);
+    return 13;
+}
+
+size_t pspc_build_macro_trigger(uint8_t *out, uint8_t slot)
+{
+    out[0] = PSPC_MSG_MACRO_TRIGGER;
+    out[1] = slot;
+    return 2;
+}

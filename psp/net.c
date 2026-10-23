@@ -417,6 +417,12 @@ static struct {
 } S = {.fd = -1, .udp = -1};
 
 static uint8_t g_plain[PSPC_MAX_MESSAGE];
+static net_message_fn g_on_message;
+
+void net_set_message_handler(net_message_fn fn)
+{
+    g_on_message = fn;
+}
 
 #define KEY_TCP_C2S (S.keys)
 #define KEY_TCP_S2C (S.keys + 32)
@@ -567,7 +573,8 @@ static int handle_message(const uint8_t *m, size_t len, uint64_t now)
         snprintf(g_stats.status, sizeof g_stats.status, "Protocol error: duplicate HelloAck.");
         return NET_ERR;
     default:
-        /* Widget, voice, audio and deck messages belong to later phases; unknown types are ignored by design. */
+        /* Feature messages go to the app; unknown types are ignored by design. */
+        if (g_on_message) g_on_message(m, len);
         return NET_OK;
     }
 }
@@ -760,4 +767,10 @@ void net_session_close(uint8_t bye_reason)
             send_all(S.fd, S.tx, S.tx_len, net_now_us() + 300 * 1000ULL);
     }
     session_reset();
+}
+
+int net_send(const uint8_t *msg, size_t len)
+{
+    if (S.fd < 0) return -1;
+    return queue_msg(msg, len);
 }

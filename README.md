@@ -5,9 +5,9 @@ Turns a PSP-3000 (ARK-4 CFW) into a low-bandwidth Wi-Fi companion for a PC. Two 
 - `host/`: **companion-host** (Rust), runs on the PC as a tray app. It owns everything heavy and everything secret.
 - `psp/`: **companion-psp** (C, pspsdk), runs on the PSP. Wi-Fi, discovery, pairing, status screen.
 
-The wire protocol is specified in [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md). Current state: phase 01
-(protocol, pairing, encrypted channels, skeletons). Voice assistant, widgets, PC speaker and Stream Deck mode come
-in later phases.
+The wire protocol is specified in [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md). Current state: protocol, pairing,
+encrypted channels, and the secondary screen (widgets, cursor, macro pad). PC speaker, voice assistant and Stream
+Deck mode follow.
 
 ## Wi-Fi budget
 
@@ -25,7 +25,9 @@ screen shows live in/out throughput against that budget.
 | `host/src/config.rs`, `state.rs`, `tray.rs` | Config file, shared state, tray UI |
 | `host/tests/e2e.rs` | Drives the real server over localhost as a PSP would |
 | `psp/` | PSP client: `main.c` (state machine and screens), `net.c`, `wifi.c`, `ui.c`, `crypto.c`, `protocol.c`, `rng.c`, `storage.c` |
-| `tools/xcheck/` | Compiles `psp/crypto.c` and `psp/protocol.c` for the PC and checks them byte for byte against the Rust host |
+| `host/src/widgets/`, `macros.rs`, `actions/`, `imaging.rs`, `app.rs` | Widget hub and sources, macro slots, desktop actions, IDX8-LZ4 images, feature router |
+| `tools/xcheck/` | Compiles the portable PSP C (`crypto.c`, `protocol.c`, `font.c`, `image.c`) for the PC and checks it against the Rust host |
+| `tools/fontgen/` | Builds `psp/font_vi.c` from the Unifont subset |
 
 ## Host
 
@@ -91,11 +93,56 @@ On the PSP:
 1. Pick the Wi-Fi profile in the system dialog.
 2. On the PC, choose **Pair new PSP** in the tray (or run with `--pair`). A 6-digit PIN appears.
 3. On the PSP, select the PC from the list (or press Triangle to type its IP) and enter the PIN.
-4. The status screen shows the PC, RTT, live throughput, totals and the audio channel state.
-   Square measures RTT now, SELECT twice forgets the pairing, START reopens the Wi-Fi dialog.
+4. The widget screen appears; the status screen (from the START menu) shows the PC, RTT, live throughput,
+   totals and the audio channel state.
+   START opens the menu; on the status screen Square measures RTT now and SELECT twice forgets the pairing.
 
 When Wi-Fi drops, the PSP reconnects to the same profile; when the PC disappears, it backs off
 (1, 2, 4 ... 30 s) and, after repeated failures, rediscovers the PC by its host ID in case its IP changed.
+
+## Secondary screen: widgets and macros
+
+After connecting, the PSP shows the widget screen. **L/R** switch pages, the **analog nub** moves a cursor and
+**X** taps a widget, **Triangle** opens the 12-slot macro pad, **START** opens the menu (widgets, connection status,
+Wi-Fi). The host pushes a widget only when its value changes, at most once per second; the clock runs on the PSP.
+
+The layout is `layout.toml` next to `config.toml` (created on first run): up to three pages and 16 widgets of kind
+`clock`, `system`, `now_playing`, `notifications`, `calendar`, `claude_code`, each with a position on the
+480x272 screen and an optional `tap` action. Macro slots and widget sources live in `config.toml`:
+
+```toml
+[widgets]
+system_interval_secs = 2     # CPU, GPU (Windows performance counters), RAM, temperatures when exposed
+now_playing = true           # Windows media session: title, artist, 64x64 cover sent once per track
+calendar_ics = ""            # .ics file path or a calendar's private iCal URL; recurring events supported
+calendar_refresh_mins = 10
+ingest_port = 47863          # local endpoint for notifications and Claude Code (127.0.0.1 only; 0 = off)
+ingest_token = ""            # if set, required in the X-Companion-Token header
+
+[[macros]]                   # slots 0-11; the PSP only ever sends the slot number
+slot = 0
+label = "Play/Pause"
+action = { type = "media", key = "play_pause" }   # play_pause, next, previous, stop, volume_up/down, mute
+# other actions: { type = "mute_mic" }, { type = "hotkey", keys = "ctrl+shift+m" },
+#   { type = "command", program = "C:\\tools\\x.exe", args = ["--flag"] }, { type = "open", target = "https://..." }
+```
+
+Notifications from any script:
+
+```sh
+curl -X POST http://127.0.0.1:47863/notify -H "Content-Type: application/json" -d "{\"title\":\"Build passed\",\"body\":\"main is green\",\"app\":\"CI\"}"
+curl -X DELETE http://127.0.0.1:47863/notify
+```
+
+Claude Code session status: add a hook for the events `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+`Notification`, `Stop`, and `SessionEnd` in `~/.claude/settings.json` that pipes the hook input to the host:
+
+```json
+{ "type": "command", "command": "curl -s -X POST http://127.0.0.1:47863/claude-code -H \"Content-Type: application/json\" --data-binary @-" }
+```
+
+The PSP font is a subset of GNU Unifont 18.0.01 (SIL Open Font License 1.1, `psp/assets/OFL-1.1.txt`) with every
+Vietnamese letter; `cargo run -p pspc-fontgen` regenerates `psp/font_vi.c` from `psp/assets/font-vi.hex`.
 
 ### Router settings for 802.11b
 

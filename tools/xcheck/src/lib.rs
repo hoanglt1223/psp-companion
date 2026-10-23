@@ -134,3 +134,63 @@ impl Default for HelloAck {
         Self { caps: 0, host_name: [0; 33], session_tag: 0, audio_port: 0, keepalive_s: 0, budget_kbps: 0 }
     }
 }
+
+// Phase 03: widgets, images, font.
+unsafe extern "C" {
+    pub fn xc_layout(data: *const u8, len: usize, out: *mut c_char, cap: usize) -> c_int;
+    pub fn xc_widget(kind: u8, data: *const u8, len: usize, out: *mut c_char, cap: usize) -> c_int;
+    pub fn pspc_parse_widget_data(
+        buf: *const u8,
+        len: usize,
+        widget_id: *mut u16,
+        format: *mut u8,
+        data: *mut *const u8,
+        data_len: *mut usize,
+    ) -> c_int;
+    pub fn pspc_parse_widget_asset(
+        buf: *const u8,
+        len: usize,
+        asset_id: *mut u64,
+        format: *mut u8,
+        data: *mut *const u8,
+        data_len: *mut usize,
+    ) -> c_int;
+    pub fn pspc_build_input_event(
+        out: *mut u8,
+        kind: u8,
+        page: u8,
+        widget_id: u16,
+        x: u16,
+        y: u16,
+        buttons: u32,
+    ) -> usize;
+    pub fn pspc_build_macro_trigger(out: *mut u8, slot: u8) -> usize;
+    pub fn lz4_block_decode(input: *const u8, in_len: usize, out: *mut u8, out_len: usize) -> c_int;
+    pub fn image_decode(
+        payload: *const u8,
+        len: usize,
+        scratch: *mut u8,
+        out: *mut u32,
+        max_pixels: usize,
+        width: *mut c_int,
+        height: *mut c_int,
+    ) -> c_int;
+    pub fn font_text_width(s: *const c_char) -> c_int;
+    pub fn font_wrap(
+        s: *const c_char,
+        max_width: c_int,
+        starts: *mut usize,
+        lens: *mut usize,
+        max_lines: c_int,
+    ) -> c_int;
+    pub fn utf8_next(s: *mut *const c_char) -> u32;
+}
+
+pub const IMAGE_MAX_RAW: usize = 6 + 256 * 3 + 128 * 128;
+
+/// Runs a text-producing shim and returns (rc, text).
+pub fn shim_text(f: impl FnOnce(*mut c_char, usize) -> c_int) -> (c_int, String) {
+    let mut buf = vec![0u8; 8192];
+    let rc = f(buf.as_mut_ptr().cast(), buf.len());
+    (rc, c_str(&buf))
+}

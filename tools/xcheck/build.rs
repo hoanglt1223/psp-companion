@@ -1,9 +1,14 @@
+const PSP_SOURCES: &[&str] = &["crypto.c", "protocol.c", "font.c", "font_vi.c", "image.c"];
+const PSP_HEADERS: &[&str] = &["crypto.h", "protocol.h", "font.h", "image.h"];
+
 fn main() {
-    for f in ["crypto.c", "crypto.h", "protocol.c", "protocol.h"] {
+    for f in PSP_SOURCES.iter().chain(PSP_HEADERS) {
         println!("cargo:rerun-if-changed=../../psp/{f}");
     }
+    println!("cargo:rerun-if-changed=c/shim.c");
     cc::Build::new()
-        .files(["../../psp/crypto.c", "../../psp/protocol.c"])
+        .files(PSP_SOURCES.iter().map(|f| format!("../../psp/{f}")))
+        .file("c/shim.c")
         .include("../../psp")
         .warnings_into_errors(true)
         .compile("pspc_portable");

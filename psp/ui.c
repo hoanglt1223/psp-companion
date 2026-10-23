@@ -3,6 +3,7 @@
 #include <pspctrl.h>
 #include <pspdebug.h>
 #include <pspdisplay.h>
+#include <pspge.h>
 #include <pspgu.h>
 #include <pspkernel.h>
 #include <psputility.h>
@@ -20,6 +21,7 @@
 static unsigned int __attribute__((aligned(16))) g_list[16 * 1024];
 static void *g_draw = (void *)0;
 static uint32_t g_prev_buttons;
+static ui_pad g_pad = {0, 128, 128};
 
 void ui_init(void)
 {
@@ -40,7 +42,7 @@ void ui_init(void)
     pspDebugScreenEnableBackColor(0);
 
     sceCtrlSetSamplingCycle(0);
-    sceCtrlSetSamplingMode(PSP_CTRL_MODE_DIGITAL);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 }
 
 static void clear_frame(void)
@@ -94,6 +96,9 @@ uint32_t ui_poll_pressed(void)
     uint32_t pressed;
     sceCtrlPeekBufferPositive(&pad, 1);
     pressed = pad.Buttons & ~g_prev_buttons;
+    g_pad.buttons = pad.Buttons;
+    g_pad.lx = pad.Lx;
+    g_pad.ly = pad.Ly;
     g_prev_buttons = pad.Buttons;
     if (pressed) rng_mix(&pad, sizeof pad);
     return pressed;
@@ -165,4 +170,15 @@ int ui_osk(const char *title, const char *initial, int max_len, char *out, size_
     }
     out[n] = '\0';
     return 0;
+}
+
+const ui_pad *ui_pad_state(void)
+{
+    return &g_pad;
+}
+
+uint32_t *ui_framebuffer(void)
+{
+    /* 0x40000000 selects the uncached mirror, so CPU writes reach VRAM before the swap. */
+    return (uint32_t *)(0x40000000u | ((uintptr_t)sceGeEdramGetAddr() + (uintptr_t)g_draw));
 }

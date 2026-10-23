@@ -25,6 +25,22 @@ void ui_text(int col, int row, uint32_t color, const char *fmt, ...) __attribute
 void ui_dialog_frame_begin(void);
 void ui_dialog_frame_end(void);
 
+#define UI_STRIDE 512
+#define UI_WIDTH 480
+#define UI_HEIGHT 272
+
+typedef struct {
+    uint32_t buttons; /* held */
+    uint8_t lx, ly;   /* analog nub, 128 is centre */
+} ui_pad;
+
+/* The pad as sampled by the last ui_poll_pressed(). */
+const ui_pad *ui_pad_state(void);
+
+/* Uncached pointer to the buffer being drawn, UI_STRIDE pixels per row (0xAABBGGRR).
+ * Valid between ui_begin() and ui_end(). */
+uint32_t *ui_framebuffer(void);
+
 /* Buttons newly pressed since the previous call. */
 uint32_t ui_poll_pressed(void);
 

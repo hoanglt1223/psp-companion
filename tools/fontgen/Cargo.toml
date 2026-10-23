@@ -1,0 +1,7 @@
+[package]
+name = "pspc-fontgen"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Builds psp/font_vi.c from the GNU Unifont subset in psp/assets/font-vi.hex"
+publish = false

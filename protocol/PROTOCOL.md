@@ -276,6 +276,67 @@ do not break older peers.
 `caps` bits and the `format` values of widget and deck images are assigned by
 the phase that introduces them; version 1 senders set unassigned bits to 0.
 
+
+## Widgets (phase 03)
+
+The host sends `WidgetLayout` once after `HelloAck`, then the current value of
+every widget it has data for (each preceded by any `WidgetAsset` it references
+that this session has not received yet). After that it sends `WidgetData` for
+a widget only when its encoded value changed, at most once per second per
+widget; a newer value replaces one that is still held back. The clock is drawn
+from the PSP's own clock and has no data. All text is UTF-8 in Unicode NFC
+(precomposed Vietnamese letters) without control characters.
+
+### `WidgetLayout` format 1
+
+| Field | Type | Notes |
+|-------|------|-------|
+| page_count | `u8` | 1-3; L/R switch pages |
+| page titles | `str8` x page_count | |
+| widget_count | `u8` | at most 16 |
+| widgets | see below, x widget_count | |
+| macro_count | `u8` | at most 12 |
+| macros | `slot: u8`, `label: str8`, x macro_count | labels of the Triangle macro pad |
+
+Widget entry: `id: u16`, `kind: u8`, `page: u8`, `x: u16`, `y: u16`, `w: u16`,
+`h: u16` (screen pixels, 480x272; the top 20 rows hold the page title),
+`flags: u8` (bit 0: tapping it runs a host action), `title: str8`.
+
+Kinds: 1 clock, 2 system, 3 now playing, 4 notifications, 5 calendar, 6 Claude Code.
+
+### `WidgetData` format 1, by kind
+
+| Kind | Payload |
+|------|---------|
+| 2 system | `cpu_pct: u8`, `gpu_pct: u8` (255: unknown), `ram_used_mb: u32`, `ram_total_mb: u32`, `cpu_temp: u16`, `gpu_temp: u16` (signed tenths of a degree C as two's complement; `0x8000`: unknown) |
+| 3 now playing | `state: u8` (0 nothing, 1 playing, 2 paused, 3 stopped), `cover_asset: u64` (0: none), `title: str8`, `artist: str8` |
+| 4 notifications | `count: u8` (at most 5, newest first), then per entry `app: str8`, `title: str8`, `body: str8`, `time: str8` (host local "HH:MM") |
+| 5 calendar | `has_event: u8`; if 1: `title: str8`, `when: str8` (host formatted: "Now", "in 25 min", "Tomorrow 09:00") |
+| 6 Claude Code | `count: u8` (at most 4, most recent first), then per entry `project: str8`, `state: u8` (0 idle, 1 working, 2 waiting for the user, 3 done), `detail: str8` |
+
+### `WidgetAsset` format 1 and image format 1 (`IDX8_LZ4`)
+
+Cover art (64x64) and Stream Deck key images share one image format, chosen
+because the PSP can expand it with a few lines of C:
+
+| Field | Type |
+|-------|------|
+| raw_len | `u32`, at most 6 + 768 + 128*128 |
+| block | LZ4 block (no frame header) that expands to exactly `raw_len` bytes |
+
+The expanded bytes are `width: u16`, `height: u16` (1-128 each),
+`colors: u16` (1-256), `colors` x RGB888, then `width*height` palette indices,
+row by row. An index at or above `colors` makes the image invalid. Asset IDs
+are the first 8 bytes of SHA-256 of the encoded payload (never 0), so the PSP
+may cache by ID and the host never resends an ID a session already has.
+
+### Input
+
+`InputEvent` kind 0 (tap) carries the page, the tapped widget's `id`, and the
+cursor position; the host runs the widget's configured action if it has one.
+`MacroTrigger` carries only the slot; the host config maps slots to actions.
+Kinds 1 and 2 (button down/up) are reserved; the PSP does not send them.
+
 ## Timers
 
 | Timer | Value | Owner |

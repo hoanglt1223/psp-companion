@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
+use crate::macros::MacroSlot;
 use crate::net::crypto::random_array;
 use crate::net::ratelimit::HARD_CAP_KBPS;
 
@@ -62,6 +63,10 @@ pub struct Config {
     pub network: NetworkConfig,
     #[serde(default)]
     pub devices: Vec<PairedDevice>,
+    #[serde(default)]
+    pub widgets: WidgetsConfig,
+    #[serde(default = "crate::macros::default_macros")]
+    pub macros: Vec<MacroSlot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -89,6 +94,57 @@ impl Default for NetworkConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct WidgetsConfig {
+    pub enabled: bool,
+    /// Relative paths are resolved against the config file's folder.
+    pub layout_file: PathBuf,
+    pub system_interval_secs: u16,
+    pub now_playing: bool,
+    /// An .ics file path or an http(s) URL (for example a calendar's private iCal address). Empty: off.
+    pub calendar_ics: String,
+    pub calendar_refresh_mins: u16,
+    /// Local HTTP endpoint for notifications and Claude Code hooks (127.0.0.1 only). 0: off.
+    pub ingest_port: u16,
+    /// When set, ingest requests must send it in the `X-Companion-Token` header.
+    pub ingest_token: String,
+}
+
+impl Default for WidgetsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            layout_file: PathBuf::from("layout.toml"),
+            system_interval_secs: 2,
+            now_playing: true,
+            calendar_ics: String::new(),
+            calendar_refresh_mins: 10,
+            ingest_port: 47863,
+            ingest_token: String::new(),
+        }
+    }
+}
+
+impl WidgetsConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !(1..=60).contains(&self.system_interval_secs) {
+            return Err(ConfigError::Invalid("widgets.system_interval_secs must be 1-60".into()));
+        }
+        if !(1..=1440).contains(&self.calendar_refresh_mins) {
+            return Err(ConfigError::Invalid("widgets.calendar_refresh_mins must be 1-1440".into()));
+        }
+        Ok(())
+    }
+
+    pub fn layout_path(&self, config_file: &Path) -> PathBuf {
+        match config_file.parent() {
+            Some(dir) if self.layout_file.is_relative() => dir.join(&self.layout_file),
+            _ => self.layout_file.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PairedDevice {
     pub id: Hex<16>,
@@ -107,6 +163,8 @@ impl Config {
             host_id: Hex(random_array()),
             network: NetworkConfig::default(),
             devices: Vec::new(),
+            widgets: WidgetsConfig::default(),
+            macros: crate::macros::default_macros(),
         }
     }
 
@@ -131,6 +189,8 @@ impl Config {
         if n.discovery_port == n.audio_port {
             return Err(ConfigError::Invalid("discovery_port and audio_port must differ".into()));
         }
+        self.widgets.validate()?;
+        crate::macros::validate(&self.macros).map_err(ConfigError::Invalid)?;
         for (i, d) in self.devices.iter().enumerate() {
             if self.devices[..i].iter().any(|o| o.id == d.id) {
                 return Err(ConfigError::Invalid(format!("device {} is listed twice", hex::encode(d.id.0))));
