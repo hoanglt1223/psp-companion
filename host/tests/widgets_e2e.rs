@@ -6,7 +6,8 @@ use std::sync::Mutex;
 
 use common::*;
 use companion_host::actions::{ActionError, Executor, Key, MediaKey};
-use companion_host::app::{self, Features, INPUT_TAP};
+use companion_host::app::{self, Backends, Features, INPUT_TAP};
+use companion_host::audio::capture::GeneratedSource;
 use companion_host::widgets::layout::Layout;
 use companion_host::widgets::model::{NowPlaying, PlayState, WidgetValue};
 use companion_host::widgets::{self, cover_asset};
@@ -70,7 +71,11 @@ async fn widgets_macros_and_taps() {
     cfg.widgets.system_interval_secs = 60;
     let rec = Arc::new(Recorder::default());
     let events = host.state.subscribe_events();
-    let features = Features::start(&host.state, &cfg, Layout::default(), rec.clone()).await;
+    let backends = Backends {
+        exec: rec.clone(),
+        capture: Arc::new(GeneratedSource { sample_rate: 48_000, channels: 2, script: vec![], speedup: 1 }),
+    };
+    let features = Features::start(&host.state, &cfg, Layout::default(), backends).await;
     let hub = features.widgets.clone().unwrap();
     let ingest = widgets::ingest::bind(0).await.unwrap();
     let ingest_addr = ingest.local_addr().unwrap();

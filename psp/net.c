@@ -418,6 +418,12 @@ static struct {
 
 static uint8_t g_plain[PSPC_MAX_MESSAGE];
 static net_message_fn g_on_message;
+static net_message_fn g_on_datagram;
+
+void net_set_datagram_handler(net_message_fn fn)
+{
+    g_on_datagram = fn;
+}
 
 void net_set_message_handler(net_message_fn fn)
 {
@@ -523,8 +529,8 @@ static void poll_udp(void)
             continue;
         }
         udp_replay_accept(seq);
-        /* Playback arrives with the PC speaker phase; for now packets are only counted. */
         g_stats.udp_packets++;
+        if (g_on_datagram) g_on_datagram(g_plain, ct_len - PSPC_TAG_LEN);
     }
 }
 

@@ -6,7 +6,7 @@ Turns a PSP-3000 (ARK-4 CFW) into a low-bandwidth Wi-Fi companion for a PC. Two 
 - `psp/`: **companion-psp** (C, pspsdk), runs on the PSP. Wi-Fi, discovery, pairing, status screen.
 
 The wire protocol is specified in [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md). Current state: protocol, pairing,
-encrypted channels, and the secondary screen (widgets, cursor, macro pad). PC speaker, voice assistant and Stream
+encrypted channels, the secondary screen (widgets, cursor, macro pad), and the PC speaker. Voice assistant and Stream
 Deck mode follow.
 
 ## Wi-Fi budget
@@ -25,8 +25,9 @@ screen shows live in/out throughput against that budget.
 | `host/src/config.rs`, `state.rs`, `tray.rs` | Config file, shared state, tray UI |
 | `host/tests/e2e.rs` | Drives the real server over localhost as a PSP would |
 | `psp/` | PSP client: `main.c` (state machine and screens), `net.c`, `wifi.c`, `ui.c`, `crypto.c`, `protocol.c`, `rng.c`, `storage.c` |
+| `host/src/audio/` | Loopback capture, MP3 encoding, stream manager (one stream per PSP) |
 | `host/src/widgets/`, `macros.rs`, `actions/`, `imaging.rs`, `app.rs` | Widget hub and sources, macro slots, desktop actions, IDX8-LZ4 images, feature router |
-| `tools/xcheck/` | Compiles the portable PSP C (`crypto.c`, `protocol.c`, `font.c`, `image.c`) for the PC and checks it against the Rust host |
+| `tools/xcheck/` | Compiles the portable PSP C (`crypto.c`, `protocol.c`, `font.c`, `image.c`, `jitter.c`) for the PC and checks it against the Rust host |
 | `tools/fontgen/` | Builds `psp/font_vi.c` from the Unifont subset |
 
 ## Host
@@ -144,6 +145,23 @@ Claude Code session status: add a hook for the events `SessionStart`, `UserPromp
 The PSP font is a subset of GNU Unifont 18.0.01 (SIL Open Font License 1.1, `psp/assets/OFL-1.1.txt`) with every
 Vietnamese letter; `cargo run -p pspc-fontgen` regenerates `psp/font_vi.c` from `psp/assets/font-vi.hex`.
 
+## PC speaker
+
+START menu, **PC speaker**, X turns it on or off; UP/DOWN set the app volume (the PSP's volume buttons work too).
+The host captures what the PC plays (WASAPI loopback, nothing is played or recorded from a microphone), encodes MP3
+at 96 kbps stereo (about 110 kbps on the air), and sends one frame per UDP packet; silent stretches send nothing.
+The PSP decodes on the Media Engine behind an adaptive 150-250 ms jitter buffer and conceals lost frames. A voice
+assistant reply pauses the speaker and it resumes afterwards (one audio stream at a time).
+
+```toml
+[audio]
+speaker_device = ""   # output device to capture; empty = the Windows default output
+```
+
+To keep the PC itself silent while the PSP plays, make an unused or virtual output device (for example a virtual
+audio cable) the Windows default output; the default-device capture then follows it. This is a manual, reversible
+Windows setting; the host never changes it.
+
 ### Router settings for 802.11b
 
 - A **2.4 GHz** SSID with 802.11b allowed (mode "b/g/n mixed", not "g/n only" or "n only").
@@ -166,4 +184,6 @@ Vietnamese letter; `cargo run -p pspc-fontgen` regenerates `psp/font_vi.c` from 
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The host links LAME (LGPL-2.0-or-later) through `mp3lame-sys` for MP3 encoding;
+since this whole program is open source, rebuilding it from source satisfies the LGPL relinking terms. The PSP font is
+a GNU Unifont subset under the SIL Open Font License 1.1.

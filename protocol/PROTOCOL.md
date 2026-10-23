@@ -337,6 +337,37 @@ cursor position; the host runs the widget's configured action if it has one.
 `MacroTrigger` carries only the slot; the host config maps slots to actions.
 Kinds 1 and 2 (button down/up) are reserved; the PSP does not send them.
 
+
+## Audio streams (phases 02 and 04)
+
+Only one stream plays on a PSP at a time. `kind` 0 is a voice reply, `kind` 1
+the PC speaker.
+
+- **Codec 1 (MP3)**: MPEG-1 Layer III, 44 100 Hz, constant bitrate, with the bit
+  reservoir disabled (`main_data_begin` is 0 in every frame), so each frame
+  decodes on its own and a lost packet costs exactly one frame. The PC speaker
+  is stereo at 96 kbps; voice replies are mono at 48 kbps.
+- The host sends `AudioStreamStart` on TCP before the stream's first packet.
+  A PSP drops packets whose `stream_id` is not the current stream.
+- `AudioPacket` carries exactly one MP3 frame (1152 samples, about 26 ms).
+  `seq` starts at 0 and increases by 1 per packet of the stream; a missing
+  `seq` is a lost packet. `pts_ms` is the frame's start time on the stream
+  timeline. The host sends nothing during silence (more than 400 ms below about
+  -60 dBFS), so `pts_ms` jumps forward while `seq` stays consecutive.
+- The PSP asks for the PC speaker with `AudioStreamRequest { kind: 1, enable }`.
+  Requests with kind 0 are ignored (voice streams come from the voice assistant).
+- A voice reply preempts the speaker: the host sends
+  `AudioStreamStop { speaker, reason: 2 }`, then starts the voice stream. When
+  the reply has played out, the host sends `AudioStreamStop { voice, reason: 0 }`
+  and, if the PSP still wants the speaker, starts it again with a new `stream_id`.
+- Voice audio is sent at most 300 ms ahead of real time; speaker audio is sent as
+  it is captured.
+- The PSP stops the current stream with `AudioStreamStop { stream_id, reason: 1 }`
+  (L+R during a reply, or turning the speaker off). The host does not answer it.
+- Recommended PSP playback: an adaptive jitter buffer of 150-250 ms; conceal a
+  lost frame by repeating the previous one at reduced volume once, then silence.
+  After an underrun, buffer up to the target again before playing.
+
 ## Timers
 
 | Timer | Value | Owner |

@@ -6,6 +6,9 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use crate::actions::Executor;
+use crate::audio::capture::CaptureSource;
+use crate::audio::stream::{self, AudioCmd, AudioHandle};
 use crate::config::Config;
 use crate::macros::MacroRunner;
 use crate::net::message::Message;
@@ -15,20 +18,22 @@ use crate::widgets::{self, HubCmd, WidgetHandle};
 
 pub const INPUT_TAP: u8 = 0;
 
+/// The desktop-facing parts, swapped for recording or generated ones in tests.
+pub struct Backends {
+    pub exec: Arc<dyn Executor>,
+    pub capture: Arc<dyn CaptureSource>,
+}
+
 pub struct Features {
     pub layout: Arc<Layout>,
     pub widgets: Option<WidgetHandle>,
     pub macros: MacroRunner,
+    pub audio: AudioHandle,
 }
 
 impl Features {
-    /// Builds the hub and data sources from the config. Must run inside the tokio runtime.
-    pub async fn start(
-        state: &Arc<AppState>,
-        config: &Config,
-        layout: Layout,
-        exec: Arc<dyn crate::actions::Executor>,
-    ) -> Self {
+    /// Builds the hub, data sources, and audio manager from the config. Must run inside the tokio runtime.
+    pub async fn start(state: &Arc<AppState>, config: &Config, layout: Layout, backends: Backends) -> Self {
         let layout = Arc::new(layout);
         let w = &config.widgets;
         let widgets = if w.enabled {
@@ -55,10 +60,11 @@ impl Features {
         } else {
             None
         };
-        Self { layout, widgets, macros: MacroRunner::new(config.macros.clone(), exec) }
+        let audio = stream::spawn_manager(state.clone(), backends.capture);
+        Self { layout, widgets, macros: MacroRunner::new(config.macros.clone(), backends.exec), audio }
     }
 
-    async fn on_message(&mut self, msg: Message) {
+    async fn on_message(&mut self, device: crate::net::handshake::Id16, msg: Message) {
         match msg {
             Message::MacroTrigger { slot } => self.macros.trigger(slot).await,
             Message::InputEvent { kind: INPUT_TAP, widget_id, .. } => {
@@ -68,6 +74,12 @@ impl Features {
                 }
             }
             Message::InputEvent { .. } => {}
+            Message::AudioStreamRequest { kind, enable } => {
+                self.audio.send(AudioCmd::Request { device, kind, enable }).await;
+            }
+            Message::AudioStreamStop { stream_id, .. } => {
+                self.audio.send(AudioCmd::PspStop { device, stream_id }).await;
+            }
             other => debug!(type_id = other.type_id(), "message not handled by this host version"),
         }
     }
@@ -77,17 +89,19 @@ pub async fn run(mut events: mpsc::Receiver<HostEvent>, mut features: Features) 
     while let Some(ev) = events.recv().await {
         match ev {
             HostEvent::SessionUp { device, session_id, name } => {
-                info!(device = %name, "PSP connected; sending widgets");
+                info!(device = %name, "PSP connected");
+                features.audio.send(AudioCmd::SessionUp { device, session_id }).await;
                 if let Some(w) = &features.widgets {
                     w.send(HubCmd::SessionUp(device, session_id)).await;
                 }
             }
             HostEvent::SessionDown { device, session_id } => {
+                features.audio.send(AudioCmd::SessionDown { device, session_id }).await;
                 if let Some(w) = &features.widgets {
                     w.send(HubCmd::SessionDown(device, session_id)).await;
                 }
             }
-            HostEvent::Message { msg, .. } => features.on_message(msg).await,
+            HostEvent::Message { device, msg } => features.on_message(device, msg).await,
         }
     }
 }

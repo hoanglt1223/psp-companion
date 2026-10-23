@@ -72,3 +72,32 @@ int xc_widget(uint8_t kind, const uint8_t *data, size_t len, char *out, size_t c
     }
     return 0;
 }
+
+/* ---------- jitter buffer ---------- */
+#include <stdlib.h>
+
+#include "jitter.h"
+
+jitter_buf *xc_jb_new(void)
+{
+    jitter_buf *jb = (jitter_buf *)malloc(sizeof *jb);
+    if (jb) jb_reset(jb);
+    return jb;
+}
+
+void xc_jb_free(jitter_buf *jb)
+{
+    free(jb);
+}
+
+/* played, lost, late, dropped, underruns, target_ms, buffering */
+void xc_jb_stats(const jitter_buf *jb, uint32_t out[7])
+{
+    out[0] = jb->played;
+    out[1] = jb->lost;
+    out[2] = jb->late;
+    out[3] = jb->dropped;
+    out[4] = jb->underruns;
+    out[5] = jb->target_ms;
+    out[6] = (uint32_t)jb->buffering;
+}

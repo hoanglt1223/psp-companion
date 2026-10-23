@@ -9,6 +9,7 @@
 #include "rng.h"
 #include "storage.h"
 #include "ui.h"
+#include "audio_stream.h"
 #include "widgets.h"
 #include "wifi.h"
 
@@ -42,7 +43,7 @@ static uint64_t g_backoff_until;
 static uint64_t g_reconnect_started;
 static int g_forget_armed;
 
-enum screen { SCR_WIDGETS, SCR_STATUS };
+enum screen { SCR_WIDGETS, SCR_STATUS, SCR_SPEAKER };
 static enum screen g_screen = SCR_WIDGETS;
 static int g_menu_open, g_menu_sel;
 
@@ -246,6 +247,7 @@ static void screen_connecting(void)
         g_state = ST_CONNECTED;
         g_menu_open = 0;
         widgets_reset();
+        audio_reset();
     } else if (rc == NET_ERR_UNPAIRED) {
         forget_pairing(err);
     } else {
@@ -266,19 +268,49 @@ static void fmt_bytes(char *out, size_t cap, uint64_t b)
 
 static void on_message(const uint8_t *m, size_t len)
 {
-    widgets_on_message(m, len);
+    if (!widgets_on_message(m, len)) audio_on_message(m, len);
 }
 
-enum menu_item { MENU_WIDGETS, MENU_STATUS, MENU_WIFI, MENU_COUNT };
+enum menu_item { MENU_WIDGETS, MENU_SPEAKER, MENU_STATUS, MENU_WIFI, MENU_COUNT };
 
 static const char *menu_label(int item)
 {
     switch (item) {
     case MENU_WIDGETS: return "Screen (widgets and macros)";
     case MENU_STATUS: return "Connection status";
+    case MENU_SPEAKER: return "PC speaker";
     case MENU_WIFI: return "Wi-Fi network";
     default: return "";
     }
+}
+
+static void speaker_screen(uint32_t pressed)
+{
+    audio_status a;
+    audio_get_status(&a);
+    if (pressed & PSP_CTRL_CROSS) audio_set_speaker(!a.speaker_wanted);
+    if (pressed & PSP_CTRL_UP) audio_volume_step(10);
+    if (pressed & PSP_CTRL_DOWN) audio_volume_step(-10);
+    if (pressed & PSP_CTRL_CIRCLE) g_screen = SCR_WIDGETS;
+    audio_get_status(&a);
+
+    ui_begin();
+    header();
+    ui_text(1, 4, UI_WHITE, "PC speaker");
+    if (a.decoder_error < 0) {
+        ui_text(1, 6, UI_RED, "MP3 decoder unavailable (0x%08X).", (unsigned)a.decoder_error);
+    } else {
+        ui_text(1, 6, a.speaker_wanted ? UI_GREEN : UI_GREY, "Speaker    %s", a.speaker_wanted ? "on" : "off");
+        ui_text(1, 7, UI_WHITE, "Playing    %s",
+                !a.active ? "nothing" : a.kind == PSPC_AUDIO_KIND_SPEAKER ? "PC audio" : "assistant reply");
+        ui_text(1, 9, UI_WHITE, "Volume     %d%%  (the PSP volume buttons work too)", a.volume_pct);
+        ui_text(1, 11, UI_WHITE, "Buffer     %u ms of %u ms target", (unsigned)a.depth_ms, (unsigned)a.target_ms);
+        ui_text(1, 12, UI_GREY, "Frames     played %u  lost %u  late %u  underruns %u", (unsigned)a.played,
+                (unsigned)a.lost, (unsigned)a.late, (unsigned)a.underruns);
+        ui_text(1, 14, UI_GREY, "Silence on the PC sends nothing over Wi-Fi.");
+    }
+    footer("X On/off   UP/DOWN Volume   O Back   START Menu");
+    ui_end();
 }
 
 static void menu_screen(uint32_t pressed)
@@ -292,6 +324,7 @@ static void menu_screen(uint32_t pressed)
         switch (g_menu_sel) {
         case MENU_WIDGETS: g_screen = SCR_WIDGETS; break;
         case MENU_STATUS: g_screen = SCR_STATUS; break;
+        case MENU_SPEAKER: g_screen = SCR_SPEAKER; break;
         case MENU_WIFI:
             net_session_close(PSPC_BYE_NORMAL);
             g_state = ST_WIFI_DIALOG;
@@ -319,6 +352,7 @@ static void screen_connected(uint32_t pressed)
 
     if (rc != NET_OK) {
         set_msg(net_get_stats()->status);
+        audio_reset();
         if (rc == NET_ERR_UNPAIRED) {
             forget_pairing(net_get_stats()->status);
         } else if (!wifi_has_ip()) {
@@ -335,6 +369,10 @@ static void screen_connected(uint32_t pressed)
     }
     if (g_menu_open) {
         menu_screen(pressed);
+        return;
+    }
+    if (g_screen == SCR_SPEAKER) {
+        speaker_screen(pressed);
         return;
     }
     if (g_screen == SCR_WIDGETS) {
@@ -472,6 +510,8 @@ int main(int argc, char *argv[])
     }
     g_paired = storage_load(&g_rec) == 0;
     net_set_message_handler(on_message);
+    net_set_datagram_handler(audio_on_datagram);
+    if (audio_init() < 0) set_msg("Audio could not start; the PC speaker is unavailable.");
 
     while (g_running) {
         uint32_t pressed = ui_poll_pressed();

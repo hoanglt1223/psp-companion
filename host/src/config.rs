@@ -65,6 +65,8 @@ pub struct Config {
     pub devices: Vec<PairedDevice>,
     #[serde(default)]
     pub widgets: WidgetsConfig,
+    #[serde(default)]
+    pub audio: AudioConfig,
     #[serde(default = "crate::macros::default_macros")]
     pub macros: Vec<MacroSlot>,
 }
@@ -144,6 +146,14 @@ impl WidgetsConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct AudioConfig {
+    /// Output device whose sound the PC speaker stream captures; empty for the default output device.
+    /// To keep the PC itself quiet, make a virtual or unused output the Windows default and name it here.
+    pub speaker_device: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PairedDevice {
@@ -164,6 +174,7 @@ impl Config {
             network: NetworkConfig::default(),
             devices: Vec::new(),
             widgets: WidgetsConfig::default(),
+            audio: AudioConfig::default(),
             macros: crate::macros::default_macros(),
         }
     }

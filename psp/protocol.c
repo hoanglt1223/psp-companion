@@ -414,3 +414,57 @@ size_t pspc_build_macro_trigger(uint8_t *out, uint8_t slot)
     out[1] = slot;
     return 2;
 }
+
+/* ---------- Audio streams ---------- */
+
+int pspc_parse_stream_start(const uint8_t *buf, size_t len, pspc_stream_start *out)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_AUDIO_STREAM_START) != PSPC_OK) return PSPC_EMALFORMED;
+    out->stream_id = rd_u8(&r);
+    out->kind = rd_u8(&r);
+    out->codec = rd_u8(&r);
+    out->sample_rate = rd_u32(&r);
+    out->channels = rd_u8(&r);
+    out->bitrate_kbps = rd_u16(&r);
+    return rd_done(&r);
+}
+
+int pspc_parse_stream_stop(const uint8_t *buf, size_t len, uint8_t *stream_id, uint8_t *reason)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_AUDIO_STREAM_STOP) != PSPC_OK) return PSPC_EMALFORMED;
+    *stream_id = rd_u8(&r);
+    *reason = rd_u8(&r);
+    return rd_done(&r);
+}
+
+int pspc_parse_audio_packet(const uint8_t *buf, size_t len, uint8_t *stream_id, uint32_t *seq, uint32_t *pts_ms,
+                            const uint8_t **data, size_t *data_len)
+{
+    reader r = {buf, len, 0};
+    if (rd_type(&r, PSPC_MSG_AUDIO_PACKET) != PSPC_OK) return PSPC_EMALFORMED;
+    *stream_id = rd_u8(&r);
+    *seq = rd_u32(&r);
+    *pts_ms = rd_u32(&r);
+    if (r.err) return PSPC_EMALFORMED;
+    *data = r.p;
+    *data_len = r.n;
+    return PSPC_OK;
+}
+
+size_t pspc_build_stream_request(uint8_t *out, uint8_t kind, uint8_t enable)
+{
+    out[0] = PSPC_MSG_AUDIO_STREAM_REQUEST;
+    out[1] = kind;
+    out[2] = enable ? 1 : 0;
+    return 3;
+}
+
+size_t pspc_build_stream_stop(uint8_t *out, uint8_t stream_id, uint8_t reason)
+{
+    out[0] = PSPC_MSG_AUDIO_STREAM_STOP;
+    out[1] = stream_id;
+    out[2] = reason;
+    return 3;
+}

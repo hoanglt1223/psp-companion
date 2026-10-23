@@ -194,3 +194,93 @@ pub fn shim_text(f: impl FnOnce(*mut c_char, usize) -> c_int) -> (c_int, String)
     let rc = f(buf.as_mut_ptr().cast(), buf.len());
     (rc, c_str(&buf))
 }
+
+// Phase 04: audio streams and the jitter buffer.
+#[repr(C)]
+pub struct JitterBuf {
+    _opaque: [u8; 0],
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct StreamStart {
+    pub stream_id: u8,
+    pub kind: u8,
+    pub codec: u8,
+    pub channels: u8,
+    pub sample_rate: u32,
+    pub bitrate_kbps: u16,
+}
+
+pub const JB_FRAME: c_int = 0;
+pub const JB_LOST: c_int = 1;
+pub const JB_SILENCE: c_int = 2;
+
+unsafe extern "C" {
+    pub fn xc_jb_new() -> *mut JitterBuf;
+    pub fn xc_jb_free(jb: *mut JitterBuf);
+    pub fn xc_jb_stats(jb: *const JitterBuf, out: *mut u32);
+    pub fn jb_put(jb: *mut JitterBuf, seq: u32, pts_ms: u32, frame: *const u8, len: usize) -> c_int;
+    pub fn jb_next(jb: *mut JitterBuf, data: *mut *const u8, len: *mut usize) -> c_int;
+    pub fn jb_depth_ms(jb: *const JitterBuf) -> u32;
+    pub fn mp3_frame_len(p: *const u8, avail: usize) -> usize;
+    pub fn pspc_parse_stream_start(buf: *const u8, len: usize, out: *mut StreamStart) -> c_int;
+    pub fn pspc_parse_stream_stop(buf: *const u8, len: usize, stream_id: *mut u8, reason: *mut u8) -> c_int;
+    pub fn pspc_parse_audio_packet(
+        buf: *const u8,
+        len: usize,
+        stream_id: *mut u8,
+        seq: *mut u32,
+        pts_ms: *mut u32,
+        data: *mut *const u8,
+        data_len: *mut usize,
+    ) -> c_int;
+    pub fn pspc_build_stream_request(out: *mut u8, kind: u8, enable: u8) -> usize;
+    pub fn pspc_build_stream_stop(out: *mut u8, stream_id: u8, reason: u8) -> usize;
+}
+
+/// Owns a C jitter buffer.
+pub struct Jitter(pub *mut JitterBuf);
+
+impl Jitter {
+    pub fn new() -> Self {
+        let p = unsafe { xc_jb_new() };
+        assert!(!p.is_null());
+        Self(p)
+    }
+
+    pub fn put(&mut self, seq: u32, pts_ms: u32, frame: &[u8]) -> bool {
+        unsafe { jb_put(self.0, seq, pts_ms, frame.as_ptr(), frame.len()) == 0 }
+    }
+
+    /// (result, frame bytes when JB_FRAME)
+    pub fn pull(&mut self) -> (c_int, Vec<u8>) {
+        let (mut p, mut n) = (std::ptr::null(), 0usize);
+        let r = unsafe { jb_next(self.0, &mut p, &mut n) };
+        let data = if r == JB_FRAME { unsafe { std::slice::from_raw_parts(p, n) }.to_vec() } else { Vec::new() };
+        (r, data)
+    }
+
+    pub fn depth_ms(&self) -> u32 {
+        unsafe { jb_depth_ms(self.0) }
+    }
+
+    /// played, lost, late, dropped, underruns, target_ms, buffering
+    pub fn stats(&self) -> [u32; 7] {
+        let mut s = [0u32; 7];
+        unsafe { xc_jb_stats(self.0, s.as_mut_ptr()) };
+        s
+    }
+}
+
+impl Default for Jitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for Jitter {
+    fn drop(&mut self) {
+        unsafe { xc_jb_free(self.0) };
+    }
+}

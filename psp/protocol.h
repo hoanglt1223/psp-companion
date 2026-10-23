@@ -216,6 +216,29 @@ size_t pspc_build_input_event(uint8_t *out, uint8_t kind, uint8_t page, uint16_t
                               uint32_t buttons);
 size_t pspc_build_macro_trigger(uint8_t *out, uint8_t slot);
 
+/* ---------- Audio streams (phases 02 and 04) ---------- */
+
+#define PSPC_AUDIO_KIND_VOICE 0
+#define PSPC_AUDIO_KIND_SPEAKER 1
+#define PSPC_AUDIO_CODEC_MP3 1
+#define PSPC_STOP_ENDED 0
+#define PSPC_STOP_USER 1
+#define PSPC_STOP_PREEMPTED 2
+
+typedef struct {
+    uint8_t stream_id, kind, codec, channels;
+    uint32_t sample_rate;
+    uint16_t bitrate_kbps;
+} pspc_stream_start;
+
+int pspc_parse_stream_start(const uint8_t *buf, size_t len, pspc_stream_start *out);
+int pspc_parse_stream_stop(const uint8_t *buf, size_t len, uint8_t *stream_id, uint8_t *reason);
+/* *data points into buf. */
+int pspc_parse_audio_packet(const uint8_t *buf, size_t len, uint8_t *stream_id, uint32_t *seq, uint32_t *pts_ms,
+                            const uint8_t **data, size_t *data_len);
+size_t pspc_build_stream_request(uint8_t *out, uint8_t kind, uint8_t enable);
+size_t pspc_build_stream_stop(uint8_t *out, uint8_t stream_id, uint8_t reason);
+
 /* Little-endian helpers used by the network code. */
 static inline void pspc_put16(uint8_t *p, uint16_t v)
 {

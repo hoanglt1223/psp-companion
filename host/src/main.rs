@@ -109,8 +109,17 @@ fn run(args: Args, paths: Paths) -> Result<(), String> {
     let layout_path = config.widgets.layout_path(&paths.config_file);
     let layout = Layout::load_or_create(&layout_path)?;
     let events = state.subscribe_events();
-    let features =
-        runtime.block_on(app::Features::start(&state, &config, layout, companion_host::actions::system_executor()));
+    let features = runtime.block_on(app::Features::start(
+        &state,
+        &config,
+        layout,
+        app::Backends {
+            exec: companion_host::actions::system_executor(),
+            capture: std::sync::Arc::new(companion_host::audio::capture::LoopbackSource {
+                device: Some(config.audio.speaker_device.trim().to_string()).filter(|d| !d.is_empty()),
+            }),
+        },
+    ));
     runtime.spawn(app::run(events, features));
 
     let server_state = state.clone();

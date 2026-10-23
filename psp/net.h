@@ -72,6 +72,8 @@ int net_send(const uint8_t *msg, size_t len);
 /* Receives every control message the network layer does not handle itself (widgets, voice, deck). */
 typedef void (*net_message_fn)(const uint8_t *msg, size_t len);
 void net_set_message_handler(net_message_fn fn);
+/* Receives each authenticated AudioPacket from the UDP channel. */
+void net_set_datagram_handler(net_message_fn fn);
 
 const net_stats *net_get_stats(void);
 /* Updates the per-second throughput figures; call once per frame. */
