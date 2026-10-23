@@ -1,0 +1,71 @@
+name: Release
+
+# Pushing a tag such as v0.2.0 builds the Windows host and the PSP EBOOT and publishes both on a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  host:
+    name: Windows host
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: cargo build --release --locked -p companion-host
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/companion-host.exe "dist/companion-host-${{ github.ref_name }}-windows-x64.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host
+          path: dist/*
+          if-no-files-found: error
+
+  psp:
+    name: PSP EBOOT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The pspdev image is Alpine-based, where JavaScript actions cannot run inside a job container,
+      # so the toolchain runs through docker exactly as scripts/build-psp.sh does locally.
+      - name: Build EBOOT.PBP
+        run: sh scripts/build-psp.sh
+      - name: Package
+        run: |
+          mkdir -p "dist/PSP/GAME/PSPCompanion"
+          cp psp/EBOOT.PBP dist/PSP/GAME/PSPCompanion/
+          cp LICENSE dist/PSP/GAME/PSPCompanion/LICENSE.txt
+          cp psp/assets/OFL-1.1.txt dist/PSP/GAME/PSPCompanion/FONT-LICENSE.txt
+          (cd dist && zip -r "../psp-companion-${{ github.ref_name }}-psp.zip" PSP)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psp
+          path: psp-companion-*-psp.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [host, psp]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" artifacts/* \
+            --repo "${{ github.repository }}" \
+            --title "PSP Companion ${{ github.ref_name }}" \
+            --generate-notes
