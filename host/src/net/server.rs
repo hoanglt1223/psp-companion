@@ -18,7 +18,7 @@ use super::message::{ByeReason, Decoded, Direction, Message, error_code};
 use super::ratelimit::{TCP_OVERHEAD, UDP_OVERHEAD};
 use crate::config::NetworkConfig;
 use crate::pairing::HostPairing;
-use crate::state::{AppState, OUTBOUND_QUEUE, Outbound, SessionHandle, UdpEndpoint};
+use crate::state::{AppState, HostEvent, OUTBOUND_QUEUE, Outbound, SessionHandle, UdpEndpoint};
 
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const SW_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -218,6 +218,7 @@ async fn handle_session(
         device_id,
         SessionHandle { session_id, device_name: device_name.clone(), addr, session_tag, outbound: tx.clone(), udp },
     );
+    state.emit(HostEvent::SessionUp { device: device_id, session_id, name: device_name.clone() }).await;
 
     let (mut reader, writer) = stream.into_split();
     let mut writer_task = tokio::spawn(write_loop(state.clone(), writer, tx_cipher, rx));
@@ -235,8 +236,9 @@ async fn handle_session(
                     Err(e) => break Err(protocol_err(format!("decrypt: {e}"))),
                 };
                 match handle_message(&plain, &tx) {
-                    Ok(true) => {}
-                    Ok(false) => break Ok(()),
+                    Ok(Handled::Done) => {}
+                    Ok(Handled::Forward(msg)) => state.emit(HostEvent::Message { device: device_id, msg }).await,
+                    Ok(Handled::Close) => break Ok(()),
                     Err(e) => {
                         let _ = tx.try_send(Outbound::Message(Message::Error {
                             code: error_code::PROTOCOL,
@@ -251,6 +253,7 @@ async fn handle_session(
         }
     };
     state.unregister_session(&device_id, session_id);
+    state.emit(HostEvent::SessionDown { device: device_id, session_id }).await;
     drop(tx);
     // Give the writer a moment to flush a final Error or Bye before the socket drops.
     if !writer_task.is_finished() {
@@ -261,13 +264,20 @@ async fn handle_session(
     result
 }
 
-/// Returns Ok(false) when the peer asked to close.
-fn handle_message(plain: &[u8], tx: &mpsc::Sender<Outbound>) -> io::Result<bool> {
+enum Handled {
+    Done,
+    /// A feature message for the event consumer.
+    Forward(Message),
+    /// The peer asked to close.
+    Close,
+}
+
+fn handle_message(plain: &[u8], tx: &mpsc::Sender<Outbound>) -> io::Result<Handled> {
     let msg = match Message::decode(plain) {
         Ok(Decoded::Known(m)) => m,
         Ok(Decoded::Unknown(t)) => {
             debug!("ignoring unknown message type 0x{t:02x}");
-            return Ok(true);
+            return Ok(Handled::Done);
         }
         Err(e) => return Err(protocol_err(format!("malformed message: {e}"))),
     };
@@ -282,13 +292,13 @@ fn handle_message(plain: &[u8], tx: &mpsc::Sender<Outbound>) -> io::Result<bool>
         }
         Message::Bye { reason } => {
             debug!(?reason, "PSP said goodbye");
-            return Ok(false);
+            return Ok(Handled::Close);
         }
         Message::Error { code, text } => warn!(code, "PSP reported an error: {text}"),
         Message::Hello { .. } => return Err(protocol_err("duplicate Hello")),
-        other => debug!(type_id = other.type_id(), "message not handled by this host version"),
+        other => return Ok(Handled::Forward(other)),
     }
-    Ok(true)
+    Ok(Handled::Done)
 }
 
 async fn write_loop(

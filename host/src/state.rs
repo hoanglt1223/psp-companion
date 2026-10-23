@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::{Config, ConfigError, Hex, PairedDevice};
 use crate::net::crypto::{CryptoError, DatagramOpener, DatagramSealer};
@@ -20,6 +20,15 @@ use crate::net::ratelimit::{RateLimiter, UDP_OVERHEAD};
 use crate::pairing::{PendingPin, generate_pin};
 
 pub const OUTBOUND_QUEUE: usize = 64;
+pub const EVENT_QUEUE: usize = 256;
+
+/// What the network layer reports to the feature modules (widgets, macros, audio, voice, deck).
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostEvent {
+    SessionUp { device: Id16, session_id: u64, name: String },
+    SessionDown { device: Id16, session_id: u64 },
+    Message { device: Id16, msg: Message },
+}
 
 #[derive(Debug)]
 pub enum Outbound {
@@ -85,6 +94,7 @@ pub struct AppState {
     bytes_tx: AtomicU64,
     bytes_rx: AtomicU64,
     audio_socket: OnceLock<Arc<UdpSocket>>,
+    events: Mutex<Option<mpsc::Sender<HostEvent>>>,
     pub limiter: RateLimiter,
 }
 
@@ -105,6 +115,7 @@ impl AppState {
             bytes_tx: AtomicU64::new(0),
             bytes_rx: AtomicU64::new(0),
             audio_socket: OnceLock::new(),
+            events: Mutex::new(None),
             limiter,
         })
     }
@@ -255,6 +266,33 @@ impl AppState {
         let sent = socket.send_to(&datagram, peer).await?;
         self.record_tx(sent + UDP_OVERHEAD);
         Ok(())
+    }
+
+    /// Routes session and feature events to the returned receiver. Without a subscriber they are dropped.
+    pub fn subscribe_events(&self) -> mpsc::Receiver<HostEvent> {
+        let (tx, rx) = mpsc::channel(EVENT_QUEUE);
+        *lock(&self.events) = Some(tx);
+        rx
+    }
+
+    /// Waits for queue space, so a slow consumer slows the PSP's reader instead of losing voice data.
+    pub async fn emit(&self, event: HostEvent) {
+        let tx = lock(&self.events).clone();
+        if let Some(tx) = tx
+            && tx.send(event).await.is_err()
+        {
+            debug!("event consumer has stopped");
+        }
+    }
+
+    /// Queues a control message to one PSP, waiting for queue space.
+    pub async fn send_to(&self, device: &Id16, msg: Message) -> Result<(), SendError> {
+        let tx = lock(&self.sessions).get(device).map(|s| s.outbound.clone()).ok_or(SendError::NoSession)?;
+        tx.send(Outbound::Message(msg)).await.map_err(|_| SendError::Closed)
+    }
+
+    pub fn is_connected(&self, device: &Id16) -> bool {
+        lock(&self.sessions).contains_key(device)
     }
 
     pub fn snapshot(&self) -> Snapshot {
