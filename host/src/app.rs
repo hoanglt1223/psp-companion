@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::macros::MacroRunner;
 use crate::net::message::Message;
 use crate::state::{AppState, HostEvent};
+use crate::voice::session::{Engines, VoiceService};
 use crate::widgets::layout::Layout;
 use crate::widgets::{self, HubCmd, WidgetHandle};
 
@@ -29,6 +30,7 @@ pub struct Features {
     pub widgets: Option<WidgetHandle>,
     pub macros: MacroRunner,
     pub audio: AudioHandle,
+    pub voice: VoiceService,
 }
 
 impl Features {
@@ -61,7 +63,8 @@ impl Features {
             None
         };
         let audio = stream::spawn_manager(state.clone(), backends.capture);
-        Self { layout, widgets, macros: MacroRunner::new(config.macros.clone(), backends.exec), audio }
+        let voice = VoiceService::new(state.clone(), audio.clone(), &config.voice, Engines::from_config(&config.voice));
+        Self { layout, widgets, macros: MacroRunner::new(config.macros.clone(), backends.exec), audio, voice }
     }
 
     async fn on_message(&mut self, device: crate::net::handshake::Id16, msg: Message) {
@@ -80,6 +83,9 @@ impl Features {
             Message::AudioStreamStop { stream_id, .. } => {
                 self.audio.send(AudioCmd::PspStop { device, stream_id }).await;
             }
+            m @ (Message::VoiceStart { .. } | Message::VoiceChunk { .. } | Message::VoiceEnd { .. }) => {
+                self.voice.on_message(device, m).await;
+            }
             other => debug!(type_id = other.type_id(), "message not handled by this host version"),
         }
     }
@@ -91,12 +97,14 @@ pub async fn run(mut events: mpsc::Receiver<HostEvent>, mut features: Features) 
             HostEvent::SessionUp { device, session_id, name } => {
                 info!(device = %name, "PSP connected");
                 features.audio.send(AudioCmd::SessionUp { device, session_id }).await;
+                features.voice.session_up(device, session_id);
                 if let Some(w) = &features.widgets {
                     w.send(HubCmd::SessionUp(device, session_id)).await;
                 }
             }
             HostEvent::SessionDown { device, session_id } => {
                 features.audio.send(AudioCmd::SessionDown { device, session_id }).await;
+                features.voice.session_down(device, session_id);
                 if let Some(w) = &features.widgets {
                     w.send(HubCmd::SessionDown(device, session_id)).await;
                 }

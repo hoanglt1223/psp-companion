@@ -574,6 +574,8 @@ static int handle_message(const uint8_t *m, size_t len, uint64_t now)
         return reason == PSPC_BYE_UNPAIRED ? NET_ERR_UNPAIRED : NET_ERR;
     case PSPC_MSG_ERROR:
         if (pspc_parse_error(m, len, &code, g_stats.status, sizeof g_stats.status) != PSPC_OK) return NET_ERR;
+        /* Codes 2-4 are notices for the user (voice assistant problems); show them where the user is. */
+        if (g_on_message) g_on_message(m, len);
         return NET_OK;
     case PSPC_MSG_HELLO_ACK:
         snprintf(g_stats.status, sizeof g_stats.status, "Protocol error: duplicate HelloAck.");

@@ -368,6 +368,33 @@ the PC speaker.
   lost frame by repeating the previous one at reduced volume once, then silence.
   After an underrun, buffer up to the target again before playing.
 
+
+## Voice assistant (phase 02)
+
+- The PSP records only while R is held and sends `VoiceStart`, then
+  `VoiceChunk`s as it records, then `VoiceEnd`. `utterance_id` is chosen by
+  the PSP and increases per utterance. `seq` starts at 0 per utterance and
+  increases by 1; the host drops an utterance whose chunks arrive out of order.
+- `VoiceStart.codec` 1 is IMA ADPCM, mono (`channels` 1), at one of 8000, 11025,
+  16000 or 22050 Hz. The PSP uses 11025 Hz (about 44 kbps).
+- Each `VoiceChunk.data` is self-contained: `predictor: i16`, `step_index: u8`
+  (0-88), `reserved: u8` (0), then 4-bit IMA ADPCM codes, low nibble first, two
+  samples per byte. The PSP sends 1024 samples (about 93 ms) per chunk.
+- Recordings are capped at 60 seconds: the PSP stops at 60 s and sends
+  `VoiceEnd` reason 2; the host ignores audio beyond 60 s regardless.
+  `VoiceEnd` reason 1 (cancelled) discards the utterance.
+- A new `VoiceStart` cancels any reply still being prepared for that PSP.
+- The host answers with one `VoiceTranscript` (`is_final` 1), then
+  `VoiceReplyText` messages whose `text` fields are appended in order, sent in
+  batches about every 250 ms; the last has `is_final` 1. The spoken reply is an
+  audio stream of kind 0 (see [Audio streams](#audio-streams-phases-02-and-04)),
+  started with the first complete sentence.
+- Problems are reported with `Error` codes 2 (not configured on the PC),
+  3 (rate limited or overloaded) or 4 (anything else), with text meant to be
+  shown as is. These codes do not close the connection; code 1 does.
+- Conversation history (the last 10 exchanges by default) is kept on the host
+  per paired PSP, across reconnects, until the host restarts.
+
 ## Timers
 
 | Timer | Value | Owner |

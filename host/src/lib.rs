@@ -10,4 +10,5 @@ pub mod net;
 pub mod pairing;
 pub mod state;
 pub mod tray;
+pub mod voice;
 pub mod widgets;

@@ -1,5 +1,5 @@
-const PSP_SOURCES: &[&str] = &["crypto.c", "protocol.c", "font.c", "font_vi.c", "image.c", "jitter.c"];
-const PSP_HEADERS: &[&str] = &["crypto.h", "protocol.h", "font.h", "image.h", "jitter.h"];
+const PSP_SOURCES: &[&str] = &["crypto.c", "protocol.c", "font.c", "font_vi.c", "image.c", "jitter.c", "adpcm.c"];
+const PSP_HEADERS: &[&str] = &["crypto.h", "protocol.h", "font.h", "image.h", "jitter.h", "adpcm.h"];
 
 fn main() {
     for f in PSP_SOURCES.iter().chain(PSP_HEADERS) {

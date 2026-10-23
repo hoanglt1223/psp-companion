@@ -67,6 +67,8 @@ pub struct Config {
     pub widgets: WidgetsConfig,
     #[serde(default)]
     pub audio: AudioConfig,
+    #[serde(default)]
+    pub voice: crate::voice::VoiceConfig,
     #[serde(default = "crate::macros::default_macros")]
     pub macros: Vec<MacroSlot>,
 }
@@ -175,6 +177,7 @@ impl Config {
             devices: Vec::new(),
             widgets: WidgetsConfig::default(),
             audio: AudioConfig::default(),
+            voice: crate::voice::VoiceConfig::default(),
             macros: crate::macros::default_macros(),
         }
     }
@@ -201,6 +204,7 @@ impl Config {
             return Err(ConfigError::Invalid("discovery_port and audio_port must differ".into()));
         }
         self.widgets.validate()?;
+        self.voice.validate().map_err(ConfigError::Invalid)?;
         crate::macros::validate(&self.macros).map_err(ConfigError::Invalid)?;
         for (i, d) in self.devices.iter().enumerate() {
             if self.devices[..i].iter().any(|o| o.id == d.id) {

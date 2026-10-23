@@ -468,3 +468,44 @@ size_t pspc_build_stream_stop(uint8_t *out, uint8_t stream_id, uint8_t reason)
     out[2] = reason;
     return 3;
 }
+
+/* ---------- Voice assistant ---------- */
+
+size_t pspc_build_voice_start(uint8_t *out, uint32_t utterance_id, uint32_t sample_rate)
+{
+    out[0] = PSPC_MSG_VOICE_START;
+    pspc_put32(out + 1, utterance_id);
+    out[5] = PSPC_VOICE_CODEC_ADPCM;
+    pspc_put32(out + 6, sample_rate);
+    out[10] = 1; /* mono */
+    return 11;
+}
+
+size_t pspc_build_voice_chunk_header(uint8_t *out, uint32_t utterance_id, uint32_t seq)
+{
+    out[0] = PSPC_MSG_VOICE_CHUNK;
+    pspc_put32(out + 1, utterance_id);
+    pspc_put32(out + 5, seq);
+    return 9;
+}
+
+size_t pspc_build_voice_end(uint8_t *out, uint32_t utterance_id, uint8_t reason)
+{
+    out[0] = PSPC_MSG_VOICE_END;
+    pspc_put32(out + 1, utterance_id);
+    out[5] = reason;
+    return 6;
+}
+
+int pspc_parse_voice_text(const uint8_t *buf, size_t len, uint8_t *type, uint32_t *utterance_id, uint8_t *is_final,
+                          char *text, size_t text_cap)
+{
+    reader r = {buf, len, 0};
+    *type = rd_u8(&r);
+    if (r.err || (*type != PSPC_MSG_VOICE_TRANSCRIPT && *type != PSPC_MSG_VOICE_REPLY_TEXT)) return PSPC_EMALFORMED;
+    *utterance_id = rd_u32(&r);
+    *is_final = rd_u8(&r);
+    if (*is_final > 1) return PSPC_EMALFORMED;
+    rd_str(&r, rd_u16(&r), text, text_cap);
+    return rd_done(&r);
+}

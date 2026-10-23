@@ -10,6 +10,9 @@
 #include "storage.h"
 #include "ui.h"
 #include "audio_stream.h"
+#include "gfx.h"
+#include "text_view.h"
+#include "voice.h"
 #include "widgets.h"
 #include "wifi.h"
 
@@ -43,7 +46,7 @@ static uint64_t g_backoff_until;
 static uint64_t g_reconnect_started;
 static int g_forget_armed;
 
-enum screen { SCR_WIDGETS, SCR_STATUS, SCR_SPEAKER };
+enum screen { SCR_WIDGETS, SCR_STATUS, SCR_SPEAKER, SCR_ASSISTANT };
 static enum screen g_screen = SCR_WIDGETS;
 static int g_menu_open, g_menu_sel;
 
@@ -248,6 +251,7 @@ static void screen_connecting(void)
         g_menu_open = 0;
         widgets_reset();
         audio_reset();
+        voice_reset();
     } else if (rc == NET_ERR_UNPAIRED) {
         forget_pairing(err);
     } else {
@@ -268,20 +272,48 @@ static void fmt_bytes(char *out, size_t cap, uint64_t b)
 
 static void on_message(const uint8_t *m, size_t len)
 {
-    if (!widgets_on_message(m, len)) audio_on_message(m, len);
+    if (!widgets_on_message(m, len) && !audio_on_message(m, len)) voice_on_message(m, len);
 }
 
-enum menu_item { MENU_WIDGETS, MENU_SPEAKER, MENU_STATUS, MENU_WIFI, MENU_COUNT };
+enum menu_item { MENU_WIDGETS, MENU_ASSISTANT, MENU_SPEAKER, MENU_STATUS, MENU_WIFI, MENU_COUNT };
 
 static const char *menu_label(int item)
 {
     switch (item) {
     case MENU_WIDGETS: return "Screen (widgets and macros)";
+    case MENU_ASSISTANT: return "Assistant (hold R to talk)";
     case MENU_STATUS: return "Connection status";
     case MENU_SPEAKER: return "PC speaker";
     case MENU_WIFI: return "Wi-Fi network";
     default: return "";
     }
+}
+
+/* Hold R to talk; L+R stops a spoken reply (and cancels a recording). */
+static void assistant_screen(uint32_t pressed)
+{
+    const ui_pad *pad = ui_pad_state();
+    int l_held = (pad->buttons & PSP_CTRL_LTRIGGER) != 0, r_held = (pad->buttons & PSP_CTRL_RTRIGGER) != 0;
+    if (l_held && r_held && (pressed & (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER))) {
+        if (voice_active()) voice_stop(1);
+        audio_stop_current();
+        tv_set_status("Stopped.", GFX_DIM);
+    } else if ((pressed & PSP_CTRL_RTRIGGER) && !l_held) {
+        audio_status a;
+        audio_get_status(&a);
+        /* Talking over a reply stops it; the PC speaker keeps playing. */
+        if (a.active && a.kind == PSPC_AUDIO_KIND_VOICE) audio_stop_current();
+        voice_start();
+    } else if (voice_active() && !r_held) {
+        voice_stop(0);
+    }
+    if (pressed & PSP_CTRL_UP) tv_scroll(3);
+    if (pressed & PSP_CTRL_DOWN) tv_scroll(-3);
+    if ((pressed & PSP_CTRL_CIRCLE) && !voice_active()) g_screen = SCR_WIDGETS;
+
+    ui_begin();
+    tv_draw(voice_active() ? voice_level() : -1, voice_seconds());
+    ui_end();
 }
 
 static void speaker_screen(uint32_t pressed)
@@ -323,6 +355,7 @@ static void menu_screen(uint32_t pressed)
         g_menu_open = 0;
         switch (g_menu_sel) {
         case MENU_WIDGETS: g_screen = SCR_WIDGETS; break;
+        case MENU_ASSISTANT: g_screen = SCR_ASSISTANT; break;
         case MENU_STATUS: g_screen = SCR_STATUS; break;
         case MENU_SPEAKER: g_screen = SCR_SPEAKER; break;
         case MENU_WIFI:
@@ -353,6 +386,7 @@ static void screen_connected(uint32_t pressed)
     if (rc != NET_OK) {
         set_msg(net_get_stats()->status);
         audio_reset();
+        voice_reset();
         if (rc == NET_ERR_UNPAIRED) {
             forget_pairing(net_get_stats()->status);
         } else if (!wifi_has_ip()) {
@@ -369,6 +403,11 @@ static void screen_connected(uint32_t pressed)
     }
     if (g_menu_open) {
         menu_screen(pressed);
+        return;
+    }
+    voice_poll();
+    if (g_screen == SCR_ASSISTANT) {
+        assistant_screen(pressed);
         return;
     }
     if (g_screen == SCR_SPEAKER) {
@@ -512,6 +551,7 @@ int main(int argc, char *argv[])
     net_set_message_handler(on_message);
     net_set_datagram_handler(audio_on_datagram);
     if (audio_init() < 0) set_msg("Audio could not start; the PC speaker is unavailable.");
+    if (voice_init() < 0) set_msg("The microphone thread could not start.");
 
     while (g_running) {
         uint32_t pressed = ui_poll_pressed();

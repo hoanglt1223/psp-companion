@@ -239,6 +239,21 @@ int pspc_parse_audio_packet(const uint8_t *buf, size_t len, uint8_t *stream_id, 
 size_t pspc_build_stream_request(uint8_t *out, uint8_t kind, uint8_t enable);
 size_t pspc_build_stream_stop(uint8_t *out, uint8_t stream_id, uint8_t reason);
 
+/* ---------- Voice assistant (phase 02) ---------- */
+
+#define PSPC_VOICE_CODEC_ADPCM 1
+#define PSPC_VOICE_END_RELEASED 0
+#define PSPC_VOICE_END_CANCELLED 1
+#define PSPC_VOICE_END_TOO_LONG 2
+
+size_t pspc_build_voice_start(uint8_t *out, uint32_t utterance_id, uint32_t sample_rate);
+/* Writes the message header; the caller appends data_len bytes of ADPCM at out + the returned length. */
+size_t pspc_build_voice_chunk_header(uint8_t *out, uint32_t utterance_id, uint32_t seq);
+size_t pspc_build_voice_end(uint8_t *out, uint32_t utterance_id, uint8_t reason);
+/* VoiceTranscript or VoiceReplyText; *type receives which. text is truncated to text_cap - 1 bytes. */
+int pspc_parse_voice_text(const uint8_t *buf, size_t len, uint8_t *type, uint32_t *utterance_id, uint8_t *is_final,
+                          char *text, size_t text_cap);
+
 /* Little-endian helpers used by the network code. */
 static inline void pspc_put16(uint8_t *p, uint16_t v)
 {

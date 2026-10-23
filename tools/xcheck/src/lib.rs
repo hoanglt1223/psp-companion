@@ -284,3 +284,28 @@ impl Drop for Jitter {
         unsafe { xc_jb_free(self.0) };
     }
 }
+
+// Phase 02: voice.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AdpcmState {
+    pub predictor: i32,
+    pub index: i32,
+}
+
+unsafe extern "C" {
+    pub fn adpcm_init(st: *mut AdpcmState);
+    pub fn adpcm_encode_chunk(st: *mut AdpcmState, pcm: *const i16, n: usize, out: *mut u8) -> usize;
+    pub fn pspc_build_voice_start(out: *mut u8, utterance_id: u32, sample_rate: u32) -> usize;
+    pub fn pspc_build_voice_chunk_header(out: *mut u8, utterance_id: u32, seq: u32) -> usize;
+    pub fn pspc_build_voice_end(out: *mut u8, utterance_id: u32, reason: u8) -> usize;
+    pub fn pspc_parse_voice_text(
+        buf: *const u8,
+        len: usize,
+        msg_type: *mut u8,
+        utterance_id: *mut u32,
+        is_final: *mut u8,
+        text: *mut c_char,
+        cap: usize,
+    ) -> c_int;
+}

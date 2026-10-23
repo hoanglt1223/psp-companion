@@ -6,8 +6,8 @@ Turns a PSP-3000 (ARK-4 CFW) into a low-bandwidth Wi-Fi companion for a PC. Two 
 - `psp/`: **companion-psp** (C, pspsdk), runs on the PSP. Wi-Fi, discovery, pairing, status screen.
 
 The wire protocol is specified in [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md). Current state: protocol, pairing,
-encrypted channels, the secondary screen (widgets, cursor, macro pad), and the PC speaker. Voice assistant and Stream
-Deck mode follow.
+encrypted channels, the secondary screen (widgets, cursor, macro pad), the PC speaker, and the Claude voice assistant.
+Stream Deck mode follows.
 
 ## Wi-Fi budget
 
@@ -25,9 +25,10 @@ screen shows live in/out throughput against that budget.
 | `host/src/config.rs`, `state.rs`, `tray.rs` | Config file, shared state, tray UI |
 | `host/tests/e2e.rs` | Drives the real server over localhost as a PSP would |
 | `psp/` | PSP client: `main.c` (state machine and screens), `net.c`, `wifi.c`, `ui.c`, `crypto.c`, `protocol.c`, `rng.c`, `storage.c` |
+| `host/src/voice/` | ADPCM, mic cleanup, whisper.cpp / hosted STT, Claude streaming client, Piper / hosted TTS, sessions |
 | `host/src/audio/` | Loopback capture, MP3 encoding, stream manager (one stream per PSP) |
 | `host/src/widgets/`, `macros.rs`, `actions/`, `imaging.rs`, `app.rs` | Widget hub and sources, macro slots, desktop actions, IDX8-LZ4 images, feature router |
-| `tools/xcheck/` | Compiles the portable PSP C (`crypto.c`, `protocol.c`, `font.c`, `image.c`, `jitter.c`) for the PC and checks it against the Rust host |
+| `tools/xcheck/` | Compiles the portable PSP C (`crypto.c`, `protocol.c`, `font.c`, `image.c`, `jitter.c`, `adpcm.c`) for the PC and checks it against the Rust host |
 | `tools/fontgen/` | Builds `psp/font_vi.c` from the Unifont subset |
 
 ## Host
@@ -144,6 +145,42 @@ Claude Code session status: add a hook for the events `SessionStart`, `UserPromp
 
 The PSP font is a subset of GNU Unifont 18.0.01 (SIL Open Font License 1.1, `psp/assets/OFL-1.1.txt`) with every
 Vietnamese letter; `cargo run -p pspc-fontgen` regenerates `psp/font_vi.c` from `psp/assets/font-vi.hex`.
+
+## Voice assistant
+
+START menu, **Assistant**. Hold **R** and speak (Vietnamese or English), release to send. The transcript and Claude's
+reply appear as text and the reply is spoken through the PSP speakers, starting with the first sentence while the
+rest is still being written. **L+R** stops the spoken reply; UP/DOWN scroll the conversation. The microphone audio
+(11 kHz IMA ADPCM, about 44 kbps) is sent only while R is held, for at most 60 seconds. The PC keeps the
+conversation history (last 10 exchanges per PSP) and owns the API key; the PSP never talks to the internet.
+
+The host needs a Claude API key and a speech-to-text engine; text-to-speech is optional (text-only replies without it).
+whisper.cpp and Piper are installed by you and configured by path; nothing large is downloaded by this project.
+
+```toml
+[voice]
+model = "claude-opus-5-5"        # "claude-haiku-5-5" answers faster, for lower voice latency
+api_key = ""                     # empty: uses the ANTHROPIC_API_KEY environment variable (recommended)
+max_tokens = 400
+history_turns = 10
+save_wav_dir = ""                # set to a folder to keep each utterance as a WAV (checking the PSP mic)
+
+[voice.stt]
+engine = "whisper_cpp"           # or "openai" for any OpenAI-compatible /v1/audio/transcriptions service
+whisper_bin = 'C:\tools\whisper\whisper-cli.exe'
+whisper_model = 'C:\tools\whisper\ggml-small.bin'   # small or larger for good Vietnamese
+# url = "https://api.openai.com/v1/audio/transcriptions"; model = "whisper-1"; api_key_env = "OPENAI_API_KEY"
+
+[voice.tts]
+engine = "piper"                 # or "openai" (any /v1/audio/speech service), or "none"
+piper_bin = 'C:\tools\piper\piper.exe'
+piper_voice_vi = 'C:\tools\piper\vi_VN-vais1000-medium.onnx'   # .onnx.json must sit next to it
+piper_voice_en = 'C:\tools\piper\en_US-amy-medium.onnx'
+```
+
+The host cleans the microphone signal (high-pass, noise gate, normalisation) before speech-to-text, and reports
+problems on the PSP in plain words (no key, rate limited, overloaded, no speech heard). Tests that need whisper.cpp
+or Piper run only when `PSPC_WHISPER_BIN`/`PSPC_WHISPER_MODEL` or `PSPC_PIPER_BIN`/`PSPC_PIPER_VOICE` are set.
 
 ## PC speaker
 
