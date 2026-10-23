@@ -1,0 +1,38 @@
+[package]
+name = "companion-host"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "PC host for PSP Companion: discovery, pairing, encrypted control and audio channels"
+publish = false
+
+[lib]
+name = "companion_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "companion-host"
+path = "src/main.rs"
+
+[dependencies]
+chacha20poly1305 = "0.11"
+curve25519-dalek = "5"
+directories = "6"
+getrandom = "0.4"
+hex = "0.4"
+hkdf = "0.13"
+hmac = "0.13"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util", "signal"] }
+toml = "1"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tray-icon = "0.26"
+winit = "0.30"
+
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

@@ -1,0 +1,7 @@
+/target/
+# PSP build output
+/psp/*.o
+/psp/*.elf
+/psp/*.prx
+/psp/*.SFO
+/psp/EBOOT.PBP
