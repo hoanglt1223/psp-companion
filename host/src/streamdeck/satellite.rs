@@ -42,7 +42,7 @@ pub struct StreamDeckConfig {
 
 impl Default for StreamDeckConfig {
     fn default() -> Self {
-        Self { enabled: true, host: "127.0.0.1".into(), port: DEFAULT_PORT, bitmap_size: 76 }
+        Self { enabled: false, host: "127.0.0.1".into(), port: DEFAULT_PORT, bitmap_size: 76 }
     }
 }
 

@@ -24,6 +24,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/companion-host.exe "dist/companion-host-${{ github.ref_name }}-windows-x64.exe"
+          Copy-Item THIRD_PARTY.md "dist/companion-host-${{ github.ref_name }}-THIRD_PARTY.md"
       - uses: actions/upload-artifact@v4
         with:
           name: host

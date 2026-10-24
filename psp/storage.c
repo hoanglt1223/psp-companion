@@ -46,7 +46,7 @@ static void encode(const pairing_record *r, uint8_t out[FILE_LEN])
     memcpy(p, &r->host_ip, 4); p += 4;
     pspc_put16(p, r->control_port); p += 2;
     memset(p, 0, 33);
-    strncpy((char *)p, r->host_name, 32);
+    memcpy(p, r->host_name, strnlen(r->host_name, 32));
     pspc_sha256(out, BODY_LEN, out + BODY_LEN);
 }
 

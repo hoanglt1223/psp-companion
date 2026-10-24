@@ -104,6 +104,18 @@ On the PSP:
    totals and the audio channel state.
    START opens the menu; on the status screen Square measures RTT now and SELECT twice forgets the pairing.
 
+### Testing on a PSP-3000 (ARK-4)
+
+1. Build (`./scripts/build-psp.sh`) and copy `psp/EBOOT.PBP` to `ms0:/PSP/GAME/PSPCompanion/` over USB.
+2. On the PC, start the host (`cargo run -p companion-host --release`) and allow it through the Windows firewall
+   (private network). Use a 2.4 GHz network the PSP can join (see *Router settings for 802.11b*).
+3. On the PSP: Game > Memory Stick > PSP Companion. Pair as above.
+4. Check, in order: widgets update for an hour; music plays 30 minutes without dropouts; a voice question gets an
+   answer within about 3 s; with `[streamdeck] enabled = true` and Companion running, keys press OBS/Spotify actions.
+5. For crash logs, run via psplink instead: `usbhostfs_pc` + `pspsh`, then run the ELF (`./companion.elf`) from `host0:` in the
+   `psp/` folder; exceptions print in `pspsh`.
+6. Report what fails, with the status-screen numbers (RTT, throughput).
+
 When Wi-Fi drops, the PSP reconnects to the same profile; when the PC disappears, it backs off
 (1, 2, 4 ... 30 s) and, after repeated failures, rediscovers the PC by its host ID in case its IP changed.
 
@@ -202,7 +214,7 @@ so and the macro pad remains available.
 
 ```toml
 [streamdeck]
-enabled = true
+enabled = false  # set true when Bitfocus Companion runs
 host = "127.0.0.1"   # the PC running Companion
 port = 16622         # Companion's Satellite TCP port
 bitmap_size = 76     # 32-96
@@ -247,6 +259,6 @@ Windows setting; the host never changes it.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The host links LAME (LGPL-2.0-or-later) through `mp3lame-sys` for MP3 encoding;
-since this whole program is open source, rebuilding it from source satisfies the LGPL relinking terms. The PSP font is
+MIT. See [LICENSE](LICENSE). The host statically links LAME (LGPL-2.0-or-later) through `mp3lame-sys` for MP3 encoding;
+[THIRD_PARTY.md](THIRD_PARTY.md) has the notice and how to relink with a modified LAME (releases ship it next to the exe). The PSP font is
 a GNU Unifont subset under the SIL Open Font License 1.1.
