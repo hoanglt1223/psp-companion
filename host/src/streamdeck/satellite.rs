@@ -22,6 +22,9 @@ pub const KEYS: u8 = COLUMNS * ROWS;
 /// Supported Satellite API range: bitmap sizes arrived in 1.5; a 2.x API may change the protocol.
 pub const MIN_API: (u32, u32, u32) = (1, 5, 0);
 pub const MAX_API_MAJOR: u32 = 1;
+/// Newest API this host was written against (Companion 5.2, per the Bitfocus Satellite API version table).
+/// Bitfocus only adds non-breaking features within 1.x, so newer 1.x versions connect with a notice.
+pub const TESTED_API: (u32, u32, u32) = (1, 15, 0);
 /// CAPS after BEGIN, CHANGE-PAGE, and CAN_CHANGE_PAGE arrived in 1.10.
 pub const CAPS_API: (u32, u32, u32) = (1, 10, 0);
 const PING_EVERY: Duration = Duration::from_secs(2);
@@ -353,6 +356,9 @@ async fn session(
                     "BEGIN" => match line.get("APIVERSION").and_then(parse_version) {
                         Some(v) if supported(v) => {
                             info!(api = ?v, companion = line.get("COMPANIONVERSION").unwrap_or("?"), "connected to Bitfocus Companion");
+                            if (v.0, v.1) > (TESTED_API.0, TESTED_API.1) {
+                                info!(api = ?v, "Satellite API is newer than {}.{}; unknown additions are ignored", TESTED_API.0, TESTED_API.1);
+                            }
                             if v >= CAPS_API {
                                 hs = Handshake::WaitCaps(v);
                             } else {

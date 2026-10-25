@@ -287,3 +287,35 @@ async fn push_to_talk_round_trip_with_history_and_errors() {
     s.send(&Message::Ping { id: 5, t_us: 0 }).await;
     assert_eq!(s.recv().await, Message::Pong { id: 5, t_us: 0 });
 }
+
+/// Piper speaks a sentence and whisper.cpp hears it back. Runs only with real installs: PSPC_PIPER_BIN,
+/// PSPC_PIPER_VOICE_EN (an English .onnx voice), PSPC_WHISPER_BIN and PSPC_WHISPER_MODEL.
+#[tokio::test]
+async fn piper_speech_round_trips_through_whisper() {
+    use companion_host::voice::stt::{STT_RATE, Stt};
+    use companion_host::voice::tts::Tts;
+    let vars = ["PSPC_PIPER_BIN", "PSPC_PIPER_VOICE_EN", "PSPC_WHISPER_BIN", "PSPC_WHISPER_MODEL"].map(std::env::var);
+    let [Ok(piper), Ok(voice), Ok(whisper), Ok(model)] = vars else {
+        eprintln!("skipped: set PSPC_PIPER_BIN, PSPC_PIPER_VOICE_EN, PSPC_WHISPER_BIN and PSPC_WHISPER_MODEL");
+        return;
+    };
+    let tts = Tts::Piper { bin: piper.into(), voice_vi: None, voice_en: Some(voice.into()) };
+    let speech = tts.synthesize("The weather in Hanoi is warm and sunny today.").await.unwrap();
+    // Linear resampling is plenty for speech recognition.
+    let step = speech.rate as f64 / f64::from(STT_RATE);
+    let n = (speech.samples.len() as f64 / step) as usize;
+    let pcm: Vec<f32> = (0..n)
+        .map(|i| {
+            let pos = i as f64 * step;
+            let (j, frac) = (pos as usize, (pos.fract()) as f32);
+            let a = speech.samples[j];
+            let b = *speech.samples.get(j + 1).unwrap_or(&a);
+            a + (b - a) * frac
+        })
+        .collect();
+    let stt = Stt::Whisper { bin: whisper.into(), model: model.into() };
+    let text = stt.transcribe(&pcm).await.unwrap().to_lowercase();
+    for word in ["weather", "hanoi", "sunny"] {
+        assert!(text.contains(word), "{word:?} missing from {text:?}");
+    }
+}
