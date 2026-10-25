@@ -1,6 +1,7 @@
 name: Release
 
-# Pushing a tag such as v0.2.0 builds the Windows host and the PSP EBOOT and publishes both on a GitHub Release.
+# Pushing a tag such as v0.2.0 builds the Windows host (exe and installer), the Linux host tarball and the PSP EBOOT
+# and publishes them on a GitHub Release.
 on:
   push:
     tags: ["v*"]
@@ -19,16 +20,45 @@ jobs:
         run: cargo test --workspace --locked
       - name: Build
         run: cargo build --release --locked -p companion-host
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; if ($LASTEXITCODE) { exit 1 } }
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          & $iscc "/DAppVersion=$version" host/packaging/windows/companion-host.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/companion-host.exe "dist/companion-host-${{ github.ref_name }}-windows-x64.exe"
-          Copy-Item THIRD_PARTY.md "dist/companion-host-${{ github.ref_name }}-THIRD_PARTY.md"
+          New-Item -ItemType Directory -Force out/packages | Out-Null
+          Copy-Item target/release/companion-host.exe "out/packages/companion-host-${{ github.ref_name }}-windows-x64.exe"
+          Copy-Item THIRD_PARTY.md "out/packages/companion-host-${{ github.ref_name }}-THIRD_PARTY.md"
       - uses: actions/upload-artifact@v4
         with:
           name: host
-          path: dist/*
+          path: out/packages/*
+          if-no-files-found: error
+
+  host-linux:
+    name: Linux host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System libraries (tray, ALSA)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxdo-dev libayatana-appindicator3-dev libasound2-dev
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Package
+        run: sh host/packaging/linux/package.sh "${{ github.ref_name }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-linux
+          path: out/packages/*.tar.gz
           if-no-files-found: error
 
   psp:
@@ -55,7 +85,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [host, psp]
+    needs: [host, host-linux, psp]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

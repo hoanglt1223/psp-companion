@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-linux:
+    name: Host (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: System libraries (tray, ALSA)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxdo-dev libayatana-appindicator3-dev libasound2-dev
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy (headless, no tray)
+        run: cargo clippy -p companion-host --no-default-features --all-targets --locked -- -D warnings
+      # Host tests never play audio, record, or inject input; Claude, STT, TTS and Companion are local test servers.
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Package
+        run: sh host/packaging/linux/package.sh ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-linux
+          path: out/packages/*.tar.gz
+          if-no-files-found: error
+
+  psp:
+    name: PSP EBOOT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same Docker command as local builds (the pspdev image cannot host JavaScript actions).
+      - name: Build EBOOT.PBP
+        run: sh scripts/build-psp.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psp-eboot
+          path: psp/EBOOT.PBP
+          if-no-files-found: error

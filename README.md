@@ -34,7 +34,8 @@ screen shows live in/out throughput against that budget.
 
 ## Host
 
-Requires Rust 1.88+ (edition 2024).
+Requires Rust 1.88+ (edition 2024). On Linux the tray needs `libgtk-3-dev libxdo-dev libayatana-appindicator3-dev`
+and the PC speaker `libasound2-dev`; `cargo build --no-default-features` builds without the tray.
 
 ```sh
 cargo build --release            # host only
@@ -89,11 +90,32 @@ Built with the pspdev toolchain in Docker, so it works from Windows:
 ```
 
 Both run `make` in `psp/` inside `pspdev/pspdev:latest` (override with `PSPDEV_IMAGE`). Copy `psp/EBOOT.PBP` to
-`ms0:/PSP/GAME/PSPCompanion/EBOOT.PBP`. The pairing record is saved as `pairing.dat` next to the EBOOT.
+`ms0:/PSP/GAME/PSPCompanion/EBOOT.PBP`. The pairing key and settings live in a system save
+(`ms0:/PSP/SAVEDATA/PSPCOMPAN0000`); a `pairing.dat` left next to the EBOOT by older versions is moved into it.
+`tools/make-psp-art.py` draws `ICON0.PNG` and `PIC1.PNG`.
 
-Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which tests and builds the Windows host, builds the
-EBOOT with the same Docker command, and attaches `companion-host-<tag>-windows-x64.exe` and
-`psp-companion-<tag>-psp.zip` (unzip onto the Memory Stick root) to a GitHub Release.
+Smoke test without a PSP (`ppsspp-headless:local` image; PPSSPP needs a larger `/dev/shm` than Docker's 64 MB):
+
+```sh
+mkdir -p ms/PSP/GAME/PSPCompanion && cp psp/EBOOT.PBP ms/PSP/GAME/PSPCompanion/
+docker run --rm --shm-size=1g -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" -w /work ppsspp-headless:local \
+  PPSSPPHeadless --memstick=/work/ms --timeout-emulated=20 --screenshot-at=20:pairing.png /work/ms/PSP/GAME/PSPCompanion/EBOOT.PBP
+```
+
+## Packaging and releases
+
+User guides: [docs/user/INSTALL.md](docs/user/INSTALL.md) (install, pairing, settings),
+[docs/user/FEATURES.md](docs/user/FEATURES.md), [docs/user/TROUBLESHOOTING.md](docs/user/TROUBLESHOOTING.md).
+
+- Windows installer: `host/packaging/windows/companion-host.iss` (Inno Setup 6; autostart and firewall rule as
+  options): `iscc /DAppVersion=0.2.0 host\packaging\windows\companion-host.iss` after `cargo build --release`.
+- Linux: `sh host/packaging/linux/package.sh [version]` builds `out/packages/companion-host-<version>-linux-x86_64.tar.gz`
+  (headless build, `install.sh`, systemd user unit `companion-host.service`).
+- `.github/workflows/ci.yml` runs on pushes and pull requests: Linux tests, clippy and rustfmt, the headless build,
+  and the EBOOT build.
+- Pushing a `v*` tag runs `.github/workflows/release.yml`: it tests on Windows and Linux and attaches the Windows
+  installer and exe, the Linux tarball, and `psp-companion-<tag>-psp.zip` (unzip onto the Memory Stick root) to a
+  GitHub Release.
 
 On the PSP:
 
@@ -205,7 +227,8 @@ With [Bitfocus Companion](https://bitfocus.io/companion) running on the PC (Sate
 or later; page switching needs 4.3 or later), each connected PSP appears in Companion's Surfaces list as a 6x3
 "PSP Companion" surface. START menu, **Stream Deck**: D-pad or the nub selects, X presses (held keys stay held, so
 long presses work), L/R switch Companion pages, Triangle opens the built-in macro pad. Any Companion integration
-works (OBS scene switching, Spotify, vMix, Home Assistant, hotkeys).
+works (OBS scene switching, Spotify, vMix, Home Assistant, hotkeys). The client was written against Satellite API
+1.15 (Companion 5.2, `TESTED_API` in `host/src/streamdeck/satellite.rs`); newer 1.x servers connect with a log notice.
 
 Key images are 76x76, palettised and compressed (a flat button is a few hundred bytes), cached on the PSP by ID, and
 only changed keys are sent: at most 5 new images per second, while keys the PSP already has (flipping back to a
@@ -238,6 +261,8 @@ audio cable) the Windows default output; the default-device capture then follows
 Windows setting; the host never changes it.
 
 ### Router settings for 802.11b
+
+Also in [docs/user/TROUBLESHOOTING.md](docs/user/TROUBLESHOOTING.md#router-settings-for-80211b).
 
 - A **2.4 GHz** SSID with 802.11b allowed (mode "b/g/n mixed", not "g/n only" or "n only").
 - **WPA2-Personal with AES (CCMP)**. The PSP cannot join WPA3, and WPA2/WPA3 transition mode often fails
