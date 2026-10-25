@@ -1,5 +1,6 @@
 //! Local settings page at `http://127.0.0.1:<ingest_port>/settings`: speech-to-text, text-to-speech and Claude
-//! model, PC speaker device, Stream Deck, widget sources, and the twelve macro slots. It edits config.toml
+//! model, PC speaker device, Stream Deck, widget sources, and the twelve macro slots; it can also open pairing and
+//! show the PIN (for a host without a tray). It edits config.toml
 //! through [`AppState::update_config`]; changes apply when the host restarts.
 //!
 //! The page can start programs (macro commands, whisper/Piper paths), so it is guarded: the listener is
@@ -12,7 +13,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -55,6 +56,7 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
     Router::new()
         .route("/settings", get(page))
         .route("/settings/config", get(read).post(write))
+        .route("/settings/pair", post(pair))
         .layer(middleware::from_fn_with_state(ctx.clone(), loopback_host_only))
         .with_state(ctx)
 }
@@ -121,6 +123,15 @@ async fn write(State(ctx): State<Ctx>, headers: HeaderMap, body: axum::body::Byt
         }
         Err(e) => fail(e.to_string()),
     }
+}
+
+/// Opens pairing and returns the PIN, so a host without a tray (Linux service) can pair without a restart.
+async fn pair(State(ctx): State<Ctx>, headers: HeaderMap) -> Response {
+    if !token_ok(&ctx, &headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let pin = ctx.state.open_pairing();
+    ([(header::CACHE_CONTROL, "no-store")], Json(serde_json::json!({ "pin": pin }))).into_response()
 }
 
 fn token_ok(ctx: &Ctx, headers: &HeaderMap) -> bool {

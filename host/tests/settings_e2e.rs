@@ -23,8 +23,6 @@ async fn raw_get(addr: SocketAddr, host: &str, path: &str) -> String {
 async fn settings_page_edits_only_its_sections_and_guards_writes() {
     let host = start_host("settings").await;
     let device: Id16 = random_array();
-    let pin = host.state.open_pairing();
-    pair(&host, &pin, device).await.unwrap();
     host.state.update_config(|c| c.voice.api_key = Secret("sk-test-secret".into())).unwrap();
 
     let listener = widgets::ingest::bind(0).await.unwrap();
@@ -43,6 +41,22 @@ async fn settings_page_edits_only_its_sections_and_guards_writes() {
 
     let no_token = http.get(format!("{base}/settings/config")).send().await.unwrap();
     assert_eq!(no_token.status(), 403);
+
+    // Pairing from the page (a host without a tray): the PIN it shows pairs a PSP.
+    let refused = http.post(format!("{base}/settings/pair")).send().await.unwrap();
+    assert_eq!(refused.status(), 403);
+    let opened: Value = http
+        .post(format!("{base}/settings/pair"))
+        .header(TOKEN_HEADER, &token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pin = opened["pin"].as_str().expect("pin").to_string();
+    assert_eq!(pin.len(), 6);
+    pair(&host, &pin, device).await.unwrap();
 
     let mut cfg: Value = http
         .get(format!("{base}/settings/config"))

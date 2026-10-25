@@ -32,7 +32,7 @@
     (recommended) or <code>voice.api_key</code> in config.toml. <span id="keystate"></span></p>
   <form id="form"></form>
 </main>
-<div class="bar"><button id="save" type="button">Save</button><span id="status"></span></div>
+<div class="bar"><button id="save" type="button">Save</button><button id="pair" type="button">Pair new PSP</button><span id="status"></span></div>
 <script>
 "use strict";
 const TOKEN = "{{TOKEN}}";
@@ -210,7 +210,19 @@ async function save() {
   }
 }
 
+async function pair() {
+  try {
+    const r = await fetch("/settings/pair", { method: "POST", headers: { "X-Companion-Settings": TOKEN } });
+    if (!r.ok) { status("Cannot open pairing (" + r.status + ").", true); return; }
+    const body = await r.json();
+    status("PIN " + body.pin + ": enter it on the PSP within 2 minutes.");
+  } catch (e) {
+    status("Cannot reach companion-host: " + e, true);
+  }
+}
+
 document.getElementById("save").onclick = save;
+document.getElementById("pair").onclick = pair;
 load().catch(e => status("Cannot load the settings: " + e, true));
 </script>
 </body>
