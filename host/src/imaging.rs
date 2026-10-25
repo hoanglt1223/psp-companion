@@ -50,7 +50,7 @@ pub fn quantize_rgb(rgb: &[u8], width: u32, height: u32) -> Result<Indexed, Imag
     let mut exact: HashMap<[u8; 3], u8> = HashMap::new();
     let mut palette = Vec::new();
     let mut indices = Vec::with_capacity(rgb.len() / 3);
-    for px in rgb.chunks_exact(3) {
+    for px in rgb.as_chunks::<3>().0 {
         let c = [px[0], px[1], px[2]];
         let next = palette.len();
         let idx = *exact.entry(c).or_insert_with(|| {
@@ -66,10 +66,10 @@ pub fn quantize_rgb(rgb: &[u8], width: u32, height: u32) -> Result<Indexed, Imag
         return Ok(Indexed { width: w, height: h, palette, indices });
     }
 
-    let rgba: Vec<u8> = rgb.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+    let rgba: Vec<u8> = rgb.as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect();
     let nq = NeuQuant::new(10, 256, &rgba);
-    let palette: Vec<[u8; 3]> = nq.color_map_rgb().chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
-    let indices = rgba.chunks_exact(4).map(|p| nq.index_of(p) as u8).collect();
+    let palette: Vec<[u8; 3]> = nq.color_map_rgb().as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect();
+    let indices = rgba.as_chunks::<4>().0.iter().map(|p| nq.index_of(p) as u8).collect();
     Ok(Indexed { width: w, height: h, palette, indices })
 }
 
@@ -101,7 +101,7 @@ impl Indexed {
         if colors == 0 || colors > 256 || raw.len() != pal_end + usize::from(width) * usize::from(height) {
             return None;
         }
-        let palette = raw[6..pal_end].chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let palette = raw[6..pal_end].as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect();
         let indices = raw[pal_end..].to_vec();
         if indices.iter().any(|&i| usize::from(i) >= colors) {
             return None;

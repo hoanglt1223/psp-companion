@@ -150,7 +150,9 @@ fn images_decode_to_the_same_pixels() {
         assert_eq!((cw as u32, ch as u32), (w, h));
         let want: Vec<u32> = img
             .to_rgb()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| 0xFF00_0000 | u32::from(c[2]) << 16 | u32::from(c[1]) << 8 | u32::from(c[0]))
             .collect();
         assert_eq!(px, want, "{w}x{h}");

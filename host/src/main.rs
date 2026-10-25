@@ -7,6 +7,7 @@ use companion_host::config::{Config, Paths};
 use companion_host::net::message::ByeReason;
 use companion_host::net::server::{self, Listeners};
 use companion_host::state::AppState;
+#[cfg(feature = "tray")]
 use companion_host::tray;
 use companion_host::widgets::layout::Layout;
 use tracing::{error, info};
@@ -134,7 +135,10 @@ fn run(args: Args, paths: Paths) -> Result<(), String> {
         info!("pairing PIN: {pin} (enter it on the PSP within 2 minutes)");
     }
 
-    let result = if args.headless {
+    let result = if args.headless || !cfg!(feature = "tray") {
+        if !args.headless {
+            info!("built without the tray icon; running headless (stop with Ctrl+C)");
+        }
         runtime.block_on(async {
             tokio::select! {
                 r = tokio::signal::ctrl_c() => r.map_err(|e| format!("cannot wait for Ctrl+C: {e}")),
@@ -142,7 +146,12 @@ fn run(args: Args, paths: Paths) -> Result<(), String> {
             }
         })
     } else {
-        tray::run(state.clone(), paths.log_dir.clone(), paths.config_file.clone())
+        #[cfg(feature = "tray")]
+        {
+            tray::run(state.clone(), paths.log_dir.clone(), paths.config_file.clone())
+        }
+        #[cfg(not(feature = "tray"))]
+        unreachable!("headless is forced without the tray feature")
     };
 
     state.close_all(ByeReason::ShuttingDown);

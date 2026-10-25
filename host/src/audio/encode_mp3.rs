@@ -118,7 +118,7 @@ impl Mp3Encoder {
         let n = if self.channels == 1 {
             self.enc.encode(MonoPcm(pcm), self.out.spare_capacity_mut())
         } else {
-            let (l, r): (Vec<i16>, Vec<i16>) = pcm.chunks_exact(2).map(|c| (c[0], c[1])).unzip();
+            let (l, r): (Vec<i16>, Vec<i16>) = pcm.as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).unzip();
             self.enc.encode(DualPcm { left: &l, right: &r }, self.out.spare_capacity_mut())
         }
         .map_err(|e| EncodeError::Encode(e.to_string()))?;
@@ -273,7 +273,7 @@ pub(crate) mod tests {
 
         let (out, channels) = decode(&bytes);
         assert_eq!(channels, 2);
-        let left: Vec<f32> = out.chunks_exact(2).map(|c| c[0]).collect();
+        let left: Vec<f32> = out.as_chunks::<2>().0.iter().map(|c| c[0]).collect();
         let at = tone_power(&left[4410..], 1000.0, 44100.0);
         let off = tone_power(&left[4410..], 3000.0, 44100.0);
         assert!(at > 0.2 && off < at / 50.0, "1 kHz {at}, 3 kHz {off}");
@@ -296,7 +296,8 @@ pub(crate) mod tests {
         let (out, channels) = decode(&lossy);
         assert_eq!(channels, 1);
         // Gaps break phase continuity, so measure the tone within each frame-sized window.
-        let windows: Vec<f32> = out[2304..].chunks_exact(1152).map(|w| tone_power(w, 440.0, 44100.0)).collect();
+        let windows: Vec<f32> =
+            out[2304..].as_chunks::<1152>().0.iter().map(|w| tone_power(w, 440.0, 44100.0)).collect();
         let p = windows.iter().sum::<f32>() / windows.len() as f32;
         assert!(p > 0.1);
     }
@@ -308,7 +309,7 @@ pub(crate) mod tests {
         let out: Vec<f32> = input.chunks(480 * 2).flat_map(|c| r.process(c)).collect();
         let frames = out.len() / 2;
         assert!((44_090..=44_110).contains(&frames), "{frames}");
-        let left: Vec<f32> = out.chunks_exact(2).map(|c| c[0]).collect();
+        let left: Vec<f32> = out.as_chunks::<2>().0.iter().map(|c| c[0]).collect();
         assert!(tone_power(&left, 1000.0, 44100.0) > 0.2);
         assert_eq!(remix(&[0.2, 0.4], 2, 1), vec![0.3f32 * 1.0]);
         assert_eq!(remix(&[0.5], 1, 2), vec![0.5, 0.5]);

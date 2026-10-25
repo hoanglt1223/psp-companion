@@ -10,6 +10,7 @@ pub mod net;
 pub mod pairing;
 pub mod state;
 pub mod streamdeck;
+#[cfg(feature = "tray")]
 pub mod tray;
 pub mod voice;
 pub mod widgets;

@@ -158,7 +158,8 @@ async fn piper(bin: &Path, voice: &Path, text: &str) -> Result<Speech, TtsError>
         Ok(raw)
     };
     let raw = tokio::time::timeout(TIMEOUT, run).await.map_err(|_| TtsError::Failed("piper timed out".into()))??;
-    let samples = raw.chunks_exact(2).map(|b| f32::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0).collect();
+    let samples =
+        raw.as_chunks::<2>().0.iter().map(|b| f32::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0).collect();
     Ok(Speech { rate: piper_rate(voice), samples })
 }
 

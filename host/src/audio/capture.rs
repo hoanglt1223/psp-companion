@@ -1,4 +1,5 @@
-//! PCM sources for the PC speaker stream: WASAPI loopback of an output device, or a generated signal.
+//! PCM sources for the PC speaker stream: WASAPI loopback of an output device (a monitor input elsewhere),
+//! or a generated signal.
 
 use std::time::Duration;
 
@@ -57,16 +58,7 @@ mod loopback {
     use tracing::warn;
 
     pub fn start(wanted: Option<&str>, tx: mpsc::Sender<Vec<f32>>) -> Result<(Stream, u32, usize), String> {
-        let host = cpal::default_host();
-        let device = match wanted {
-            None => host.default_output_device().ok_or("no default output device")?,
-            Some(name) => host
-                .output_devices()
-                .map_err(|e| e.to_string())?
-                .find(|d| d.description().is_ok_and(|desc| desc.name() == name))
-                .ok_or_else(|| format!("output device {name:?} not found"))?,
-        };
-        let supported = device.default_output_config().map_err(|e| e.to_string())?;
+        let (device, supported) = open_device(wanted)?;
         let config = supported.config();
         let (rate, channels) = (config.sample_rate, usize::from(config.channels));
         let err = |e| warn!("speaker capture error: {e}");
@@ -92,6 +84,39 @@ mod loopback {
         .map_err(|e| format!("cannot open loopback capture: {e}"))?;
         stream.play().map_err(|e| e.to_string())?;
         Ok((stream, rate, channels))
+    }
+
+    /// WASAPI captures an output device in loopback mode when an input stream is built on it.
+    #[cfg(windows)]
+    fn open_device(wanted: Option<&str>) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
+        let host = cpal::default_host();
+        let device = match wanted {
+            None => host.default_output_device().ok_or("no default output device")?,
+            Some(name) => host
+                .output_devices()
+                .map_err(|e| e.to_string())?
+                .find(|d| d.description().is_ok_and(|desc| desc.name() == name))
+                .ok_or_else(|| format!("output device {name:?} not found"))?,
+        };
+        let supported = device.default_output_config().map_err(|e| e.to_string())?;
+        Ok((device, supported))
+    }
+
+    /// Elsewhere there is no loopback mode: the user names an input device that carries the output mix
+    /// (on PipeWire/PulseAudio, `pulse` with `PULSE_SOURCE=@DEFAULT_MONITOR@`). Never falls back to the
+    /// default input, which is usually the microphone.
+    #[cfg(not(windows))]
+    fn open_device(wanted: Option<&str>) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
+        let name = wanted.ok_or(
+            "set [audio] speaker_device to a monitor input (for example \"pulse\" with PULSE_SOURCE=@DEFAULT_MONITOR@)",
+        )?;
+        let device = cpal::default_host()
+            .input_devices()
+            .map_err(|e| e.to_string())?
+            .find(|d| d.description().is_ok_and(|desc| desc.name() == name))
+            .ok_or_else(|| format!("input device {name:?} not found"))?;
+        let supported = device.default_input_config().map_err(|e| e.to_string())?;
+        Ok((device, supported))
     }
 }
 

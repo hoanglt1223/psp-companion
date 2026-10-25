@@ -8,7 +8,6 @@
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -69,9 +68,12 @@ impl Store {
 
 /// Maps one hook event to the session's new state; None removes the session.
 pub fn apply_hook(prev: Option<&ClaudeSession>, h: &HookInput) -> Option<Option<ClaudeSession>> {
-    let project = Path::new(&h.cwd)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
+    // Either separator: the hook may run on another OS than the host (WSL, a remote shell).
+    let project = h
+        .cwd
+        .rsplit(['/', '\\'])
+        .find(|s| !s.is_empty())
+        .map(str::to_string)
         .or_else(|| prev.map(|p| p.project.clone()))
         .unwrap_or_else(|| "session".into());
     let (state, detail) = match h.hook_event_name.as_str() {

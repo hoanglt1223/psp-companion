@@ -7,7 +7,7 @@ description = "Compiles the PSP client's portable C crypto for the host and chec
 publish = false
 
 [dependencies]
-companion-host = { path = "../../host" }
+companion-host = { path = "../../host", default-features = false }
 
 [dev-dependencies]
 chacha20poly1305 = "0.11"

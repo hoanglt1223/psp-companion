@@ -2,6 +2,7 @@
 name = "companion-host"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT"
 description = "PC host for PSP Companion: discovery, pairing, encrypted control and audio channels"
 publish = false
@@ -42,10 +43,14 @@ toml = "1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tray-icon = "0.26"
+tray-icon = { version = "0.26", optional = true }
 unicode-normalization = "0.1.26"
-winit = "0.30"
+winit = { version = "0.30", optional = true }
 
+[features]
+# The tray needs GTK 3 and libappindicator on Linux; `--no-default-features` builds a headless-only host.
+default = ["tray"]
+tray = ["dep:tray-icon", "dep:winit"]
 
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

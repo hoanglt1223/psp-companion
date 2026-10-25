@@ -204,7 +204,7 @@ async fn voice_preempts_the_speaker_which_then_resumes() {
     assert!(first_at.unwrap() < Duration::from_millis(300), "first voice audio after {:?}", first_at.unwrap());
     let voice_bytes: Vec<u8> = voice_packets.iter().flat_map(|p| p.3.clone()).collect();
     let decoded = decode_mono(&voice_bytes);
-    let windows: Vec<f32> = decoded[2304..].chunks_exact(1152).map(|w| tone_power(w, 300.0)).collect();
+    let windows: Vec<f32> = decoded[2304..].as_chunks::<1152>().0.iter().map(|w| tone_power(w, 300.0)).collect();
     assert!(windows.iter().sum::<f32>() / windows.len() as f32 > 0.1, "the voice audio survives");
 
     // After the reply has played out, the voice stream ends and the speaker comes back.
