@@ -80,7 +80,7 @@ async fn widgets_macros_and_taps() {
     let hub = features.widgets.clone().unwrap();
     let ingest = widgets::ingest::bind(0).await.unwrap();
     let ingest_addr = ingest.local_addr().unwrap();
-    widgets::ingest::spawn(ingest, hub.clone(), "secret".into());
+    widgets::ingest::serve(ingest, widgets::ingest::router(hub.clone(), "secret".into()));
     tokio::spawn(app::run(events, features));
 
     let device: Id16 = random_array();

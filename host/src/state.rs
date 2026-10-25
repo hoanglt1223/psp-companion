@@ -188,6 +188,16 @@ impl AppState {
         Ok(())
     }
 
+    /// Applies an edit to the config and saves it; the running features keep their settings until a restart.
+    pub fn update_config(&self, edit: impl FnOnce(&mut Config)) -> Result<(), ConfigError> {
+        let mut cfg = lock(&self.config);
+        let mut next = cfg.clone();
+        edit(&mut next);
+        next.save(&self.config_path)?;
+        *cfg = next;
+        Ok(())
+    }
+
     pub fn device_key(&self, device_id: &Id16) -> Option<[u8; 32]> {
         lock(&self.config).device(device_id).map(|d| d.key.0)
     }

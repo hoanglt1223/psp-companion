@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PSP Companion settings</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1d2733; }
+  main { max-width: 860px; margin: 0 auto; padding: 1rem 1.25rem 4rem; }
+  h1 { font-size: 1.4rem; }
+  fieldset { background: #fff; border: 1px solid #d5dbe1; border-radius: 8px; margin: 1rem 0; padding: .75rem 1rem 1rem; }
+  legend { font-weight: 600; padding: 0 .4rem; }
+  label { display: grid; grid-template-columns: 15rem 1fr; gap: .75rem; align-items: center; margin: .35rem 0; }
+  label.check { grid-template-columns: 15rem auto; justify-content: start; }
+  input[type=text], input[type=number], select, textarea { width: 100%; box-sizing: border-box; padding: .3rem .4rem;
+    border: 1px solid #b9c2cc; border-radius: 4px; font: inherit; }
+  textarea { min-height: 4rem; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: .25rem; text-align: left; vertical-align: top; }
+  th { font-weight: 600; font-size: .9rem; }
+  .hint { color: #5b6773; font-size: .88rem; margin: .2rem 0 .5rem; }
+  .bar { position: sticky; bottom: 0; background: #1d2733; color: #fff; padding: .75rem 1.25rem; display: flex; gap: 1rem; align-items: center; }
+  .bar button { font: inherit; padding: .4rem 1.2rem; border: 0; border-radius: 4px; background: #40c0f0; color: #062033; cursor: pointer; }
+  #status.err { color: #ffb4b4; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PSP Companion settings</h1>
+  <p class="hint">Saved to config.toml on this PC. Restart companion-host to apply. Network ports and paired PSPs are
+    not changed here. The Claude API key is never shown: set the ANTHROPIC_API_KEY environment variable
+    (recommended) or <code>voice.api_key</code> in config.toml. <span id="keystate"></span></p>
+  <form id="form"></form>
+</main>
+<div class="bar"><button id="save" type="button">Save</button><span id="status"></span></div>
+<script>
+"use strict";
+const TOKEN = "{{TOKEN}}";
+const MEDIA = ["play_pause", "next", "previous", "stop", "volume_up", "volume_down", "mute"];
+const SECTIONS = [
+  ["Claude", "voice", [
+    ["enabled", "Voice assistant on", "bool"],
+    ["model", "Model", "text", "claude-opus-5-5 (best) or claude-haiku-5-5 (faster replies)"],
+    ["max_tokens", "Max reply tokens", "int"],
+    ["history_turns", "Exchanges remembered per PSP", "int"],
+    ["system_prompt", "System prompt (empty: built-in)", "area"],
+    ["save_wav_dir", "Save each utterance as WAV in", "text", "Empty: off. Useful to check the PSP microphone."],
+  ]],
+  ["Speech to text", "voice.stt", [
+    ["engine", "Engine", ["whisper_cpp", "openai"]],
+    ["whisper_bin", "whisper.cpp program (whisper-cli)", "text"],
+    ["whisper_model", "whisper.cpp model (.bin)", "text", "ggml-small or larger for good Vietnamese."],
+    ["url", "Hosted service URL", "text", "Any OpenAI-compatible /v1/audio/transcriptions endpoint."],
+    ["model", "Hosted model", "text"],
+    ["api_key_env", "Environment variable with its key", "text"],
+  ]],
+  ["Text to speech", "voice.tts", [
+    ["engine", "Engine", ["piper", "openai", "none"]],
+    ["piper_bin", "Piper program", "text"],
+    ["piper_voice_vi", "Piper Vietnamese voice (.onnx)", "text", "The .onnx.json file must sit next to it."],
+    ["piper_voice_en", "Piper English voice (.onnx)", "text"],
+    ["url", "Hosted service URL", "text", "Any OpenAI-compatible /v1/audio/speech endpoint."],
+    ["model", "Hosted model", "text"],
+    ["voice_vi", "Hosted Vietnamese voice", "text"],
+    ["voice_en", "Hosted English voice", "text"],
+    ["api_key_env", "Environment variable with its key", "text"],
+  ]],
+  ["PC speaker", "audio", [
+    ["speaker_device", "Capture device", "text",
+      "Windows: an output device name, empty for the default output. Linux: a monitor input such as \"pulse\" (see the docs)."],
+  ]],
+  ["Stream Deck (Bitfocus Companion)", "streamdeck", [
+    ["enabled", "Connect to Companion", "bool"],
+    ["host", "Companion host", "text"],
+    ["port", "Satellite TCP port", "int"],
+    ["bitmap_size", "Key image size (32-96 px)", "int"],
+  ]],
+  ["Widgets", "widgets", [
+    ["enabled", "Widget screen on", "bool"],
+    ["layout_file", "Layout file", "text", "Relative to the config folder. Widget positions and pages live there."],
+    ["system_interval_secs", "CPU/GPU/RAM update every (s)", "int"],
+    ["now_playing", "Now playing (Windows media session)", "bool"],
+    ["calendar_ics", "Calendar (.ics path or private iCal URL)", "text"],
+    ["calendar_refresh_mins", "Calendar refresh (min)", "int"],
+    ["ingest_port", "Local port (notifications, this page)", "int", "0 turns off notifications, Claude Code status and this page."],
+    ["ingest_token", "Notification token (optional)", "text"],
+  ]],
+];
+
+let data = null;
+
+function at(path) { return path.split(".").reduce((o, k) => o[k], data); }
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  Object.assign(e, attrs || {});
+  kids.forEach(k => e.append(k));
+  return e;
+}
+
+function field(obj, key, label, kind, hint) {
+  let input;
+  if (Array.isArray(kind)) {
+    input = el("select", {}, ...kind.map(v => el("option", { value: v, textContent: v })));
+    input.value = obj[key];
+    input.onchange = () => { obj[key] = input.value; };
+  } else if (kind === "bool") {
+    input = el("input", { type: "checkbox", checked: !!obj[key] });
+    input.onchange = () => { obj[key] = input.checked; };
+  } else if (kind === "int") {
+    input = el("input", { type: "number", value: obj[key], min: 0 });
+    input.onchange = () => { obj[key] = Number.parseInt(input.value, 10) || 0; };
+  } else {
+    input = kind === "area" ? el("textarea", { value: obj[key] ?? "" }) : el("input", { type: "text", value: obj[key] ?? "" });
+    input.oninput = () => { obj[key] = input.value; };
+  }
+  const row = el("label", { className: kind === "bool" ? "check" : "" }, label, input);
+  return hint ? [row, el("div", { className: "hint", textContent: hint })] : [row];
+}
+
+function macroRow(slot) {
+  const m = data.macros.find(x => x.slot === slot);
+  const label = el("input", { type: "text", value: m ? m.label : "", maxLength: 24 });
+  const type = el("select", {}, ...["", "media", "mute_mic", "hotkey", "command", "open"].map(v =>
+    el("option", { value: v, textContent: v || "(empty)" })));
+  type.value = m ? m.action.type : "";
+  const value = el("td");
+  const row = el("tr", {}, el("td", { textContent: String(slot) }), el("td", {}, label), el("td", {}, type), value);
+  let action = m ? structuredClone(m.action) : null;
+  function draw() {
+    value.replaceChildren();
+    const t = type.value;
+    if (!t) { action = null; return; }
+    if (!action || action.type !== t) {
+      action = { media: { type: t, key: "play_pause" }, mute_mic: { type: t }, hotkey: { type: t, keys: "" },
+                 command: { type: t, program: "", args: [] }, open: { type: t, target: "" } }[t];
+    }
+    if (t === "media") {
+      const s = el("select", {}, ...MEDIA.map(v => el("option", { value: v, textContent: v })));
+      s.value = action.key; s.onchange = () => { action.key = s.value; };
+      value.append(s);
+    } else if (t === "hotkey") {
+      const i = el("input", { type: "text", value: action.keys, placeholder: "ctrl+shift+m" });
+      i.oninput = () => { action.keys = i.value; };
+      value.append(i);
+    } else if (t === "command") {
+      const p = el("input", { type: "text", value: action.program, placeholder: "program path" });
+      const a = el("textarea", { value: (action.args || []).join("\n"), placeholder: "arguments, one per line" });
+      p.oninput = () => { action.program = p.value; };
+      a.oninput = () => { action.args = a.value.split("\n").filter(x => x.length); };
+      value.append(p, a);
+    } else if (t === "open") {
+      const i = el("input", { type: "text", value: action.target, placeholder: "file, folder, app or URL" });
+      i.oninput = () => { action.target = i.value; };
+      value.append(i);
+    }
+  }
+  type.onchange = draw;
+  draw();
+  row.collect = () => action && label.value.trim() ? { slot, label: label.value.trim(), action } : null;
+  return row;
+}
+
+let macroRows = [];
+
+function render() {
+  const form = document.getElementById("form");
+  form.replaceChildren();
+  for (const [title, path, fields] of SECTIONS) {
+    const obj = at(path);
+    const fs = el("fieldset", {}, el("legend", { textContent: title }));
+    for (const [key, label, kind, hint] of fields) fs.append(...field(obj, key, label, kind, hint));
+    form.append(fs);
+  }
+  macroRows = Array.from({ length: 12 }, (_, i) => macroRow(i));
+  const table = el("table", {}, el("tr", {}, ...["Slot", "Label", "Action", "Value"].map(t => el("th", { textContent: t }))),
+                   ...macroRows);
+  form.append(el("fieldset", {}, el("legend", { textContent: "Macro pad (12 slots)" }),
+    el("div", { className: "hint", textContent: "Slots without a label or action stay empty on the PSP." }), table));
+}
+
+function status(text, err) {
+  const s = document.getElementById("status");
+  s.textContent = text;
+  s.className = err ? "err" : "";
+}
+
+async function load() {
+  const r = await fetch("/settings/config", { headers: { "X-Companion-Settings": TOKEN } });
+  if (!r.ok) { status("Cannot load the settings (" + r.status + ").", true); return; }
+  data = await r.json();
+  document.getElementById("keystate").textContent =
+    data.api_key_set ? "An API key is set in config.toml." : "No API key in config.toml (the environment variable is used).";
+  delete data.api_key_set;
+  render();
+}
+
+async function save() {
+  data.macros = macroRows.map(r => r.collect()).filter(Boolean);
+  status("Saving...");
+  try {
+    const r = await fetch("/settings/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Companion-Settings": TOKEN },
+      body: JSON.stringify(data),
+    });
+    const body = await r.json().catch(() => ({ message: "HTTP " + r.status }));
+    status(body.message, !r.ok);
+  } catch (e) {
+    status("Cannot reach companion-host: " + e, true);
+  }
+}
+
+document.getElementById("save").onclick = save;
+load().catch(e => status("Cannot load the settings: " + e, true));
+</script>
+</body>
+</html>

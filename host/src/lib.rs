@@ -8,6 +8,7 @@ pub mod imaging;
 pub mod macros;
 pub mod net;
 pub mod pairing;
+pub mod settings;
 pub mod state;
 pub mod streamdeck;
 #[cfg(feature = "tray")]

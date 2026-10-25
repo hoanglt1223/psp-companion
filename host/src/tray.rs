@@ -53,6 +53,7 @@ struct Items {
     traffic: MenuItem,
     pair: MenuItem,
     forget: MenuItem,
+    settings: MenuItem,
     logs: MenuItem,
     config: MenuItem,
     quit: MenuItem,
@@ -62,6 +63,8 @@ struct TrayApp {
     state: Arc<AppState>,
     log_dir: PathBuf,
     config_file: PathBuf,
+    /// The port the settings page was started on; edits to it apply only after a restart.
+    settings_port: u16,
     items: Items,
     menu: Menu,
     tray: Option<TrayIcon>,
@@ -81,6 +84,7 @@ pub fn run(state: Arc<AppState>, log_dir: PathBuf, config_file: PathBuf) -> Resu
         traffic: MenuItem::new("", false, None),
         pair: MenuItem::new("Pair new PSP (show PIN)", true, None),
         forget: MenuItem::new("Forget all paired PSPs", true, None),
+        settings: MenuItem::new("Settings...", true, None),
         logs: MenuItem::new("Open log folder", true, None),
         config: MenuItem::new("Open config folder", true, None),
         quit: MenuItem::new("Quit", true, None),
@@ -93,6 +97,7 @@ pub fn run(state: Arc<AppState>, log_dir: PathBuf, config_file: PathBuf) -> Resu
         &PredefinedMenuItem::separator(),
         &items.pair,
         &items.forget,
+        &items.settings,
         &items.logs,
         &items.config,
         &PredefinedMenuItem::separator(),
@@ -101,10 +106,12 @@ pub fn run(state: Arc<AppState>, log_dir: PathBuf, config_file: PathBuf) -> Resu
     .map_err(|e| e.to_string())?;
 
     let snap = state.snapshot();
+    let settings_port = state.config().widgets.ingest_port;
     let mut app = TrayApp {
         state,
         log_dir,
         config_file,
+        settings_port,
         items,
         menu,
         tray: None,
@@ -138,6 +145,11 @@ fn open_folder(path: &std::path::Path) {
     if let Err(e) = std::fs::create_dir_all(path) {
         warn!("cannot create {}: {e}", path.display());
     }
+    open(path.as_os_str());
+}
+
+/// Hands a folder or URL to the desktop (explorer opens URLs in the default browser).
+fn open(target: &std::ffi::OsStr) {
     let program = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -145,8 +157,8 @@ fn open_folder(path: &std::path::Path) {
     } else {
         "xdg-open"
     };
-    if let Err(e) = std::process::Command::new(program).arg(path).spawn() {
-        warn!("cannot open {}: {e}", path.display());
+    if let Err(e) = std::process::Command::new(program).arg(target).spawn() {
+        warn!("cannot open {}: {e}", target.display());
     }
 }
 
@@ -213,6 +225,13 @@ impl ApplicationHandler<UserEvent> for TrayApp {
             match self.state.forget_all_devices() {
                 Ok(()) => info!("all paired devices forgotten"),
                 Err(e) => error!("cannot forget devices: {e}"),
+            }
+        } else if id == *self.items.settings.id() {
+            let port = self.settings_port;
+            if port == 0 {
+                warn!("the settings page needs widgets.ingest_port; it is 0 in config.toml");
+            } else {
+                open(crate::settings::url(port).as_ref());
             }
         } else if id == *self.items.logs.id() {
             open_folder(&self.log_dir);

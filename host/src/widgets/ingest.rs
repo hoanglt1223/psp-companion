@@ -172,13 +172,14 @@ pub async fn bind(port: u16) -> std::io::Result<TcpListener> {
     TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await
 }
 
-pub fn spawn(listener: TcpListener, handle: WidgetHandle, token: String) {
+/// Serves any local router (ingest, settings page) on the loopback listener.
+pub fn serve(listener: TcpListener, router: Router) {
     if let Ok(addr) = listener.local_addr() {
-        info!(%addr, "widget ingest endpoint listening");
+        info!(%addr, "local HTTP endpoint listening");
     }
     tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, router(handle, token)).await {
-            warn!("widget ingest endpoint stopped: {e}");
+        if let Err(e) = axum::serve(listener, router).await {
+            warn!("local HTTP endpoint stopped: {e}");
         }
     });
 }

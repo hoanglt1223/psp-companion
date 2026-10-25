@@ -54,16 +54,25 @@ impl Features {
                     Duration::from_secs(u64::from(w.calendar_refresh_mins) * 60),
                 );
             }
-            if w.ingest_port != 0 {
-                match widgets::ingest::bind(w.ingest_port).await {
-                    Ok(l) => widgets::ingest::spawn(l, handle.clone(), w.ingest_token.clone()),
-                    Err(e) => warn!(port = w.ingest_port, "widget ingest endpoint disabled: {e}"),
-                }
-            }
             Some(handle)
         } else {
             None
         };
+        if w.ingest_port != 0 {
+            match widgets::ingest::bind(w.ingest_port).await {
+                Ok(l) => {
+                    let mut router = crate::settings::router(state.clone(), w.ingest_port);
+                    if let Some(h) = &widgets {
+                        router = router.merge(widgets::ingest::router(h.clone(), w.ingest_token.clone()));
+                    }
+                    widgets::ingest::serve(l, router);
+                    info!("settings page: {}", crate::settings::url(w.ingest_port));
+                }
+                Err(e) => {
+                    warn!(port = w.ingest_port, "local HTTP endpoint (notifications, settings page) disabled: {e}")
+                }
+            }
+        }
         let audio = stream::spawn_manager(state.clone(), backends.capture);
         let voice = VoiceService::new(state.clone(), audio.clone(), &config.voice, Engines::from_config(&config.voice));
         let deck = config.streamdeck.enabled.then(|| spawn_bridge(state.clone(), config.streamdeck.clone()));
