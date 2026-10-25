@@ -5,12 +5,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "menu.h"
 #include "net.h"
+#include "power.h"
 #include "rng.h"
 #include "storage.h"
 #include "ui.h"
 #include "audio_stream.h"
 #include "gfx.h"
+#include "macros.h"
 #include "text_view.h"
 #include "streamdeck.h"
 #include "voice.h"
@@ -21,7 +24,7 @@ PSP_MODULE_INFO("PSP Companion", PSP_MODULE_USER, 0, 1);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(-1024);
 
-#define APP_VERSION "0.1.0"
+#define APP_VERSION "0.2.0"
 #define WIFI_RECONNECT_TIMEOUT_US (30 * 1000 * 1000ULL)
 
 enum app_state {
@@ -49,7 +52,6 @@ static int g_forget_armed;
 
 enum screen { SCR_WIDGETS, SCR_STATUS, SCR_SPEAKER, SCR_ASSISTANT, SCR_DECK };
 static enum screen g_screen = SCR_WIDGETS;
-static int g_menu_open, g_menu_sel;
 
 static int exit_callback(int arg1, int arg2, void *common)
 {
@@ -66,6 +68,7 @@ static int callback_thread(SceSize args, void *argp)
     (void)args;
     (void)argp;
     sceKernelRegisterExitCallback(cbid);
+    power_init();
     sceKernelSleepThreadCB();
     return 0;
 }
@@ -84,12 +87,19 @@ static void set_msg(const char *m)
 static void header(void)
 {
     int strength = wifi_strength();
+    power_status p;
+    power_get(&p);
     ui_text(1, 1, UI_CYAN, "PSP Companion %s", APP_VERSION);
     if (strength >= 0)
-        ui_text(46, 1, UI_GREY, "Wi-Fi %3d%%", strength);
+        ui_text(36, 1, UI_GREY, "Wi-Fi %3d%%", strength);
     else
-        ui_text(46, 1, UI_RED, "Wi-Fi  off");
-    ui_text(1, 2, UI_GREY, "------------------------------------------------------------");
+        ui_text(36, 1, UI_RED, "Wi-Fi  off");
+    if (p.percent >= 0)
+        ui_text(48, 1, p.charging ? UI_CYAN : p.low || p.percent <= 15 ? UI_RED : UI_GREY, "Bat %3d%%%s", p.percent,
+                p.charging ? "+" : "");
+    else if (p.on_ac)
+        ui_text(48, 1, UI_CYAN, "AC");
+    ui_text(1, 2, UI_GREY, "----------------------------------------------------------");
 }
 
 static void footer(const char *keys)
@@ -198,7 +208,7 @@ static void screen_discover(uint32_t pressed)
 
     ui_begin();
     header();
-    ui_text(1, 4, UI_WHITE, "Pair with a PC. On the PC, choose 'Pair new PSP' in the tray.");
+    ui_text(1, 4, UI_WHITE, "Pair with a PC: choose 'Pair new PSP' in the PC's tray.");
     ui_text(1, 6, UI_GREY, net_discovery_active() ? "Searching the local network..." : "Search finished.");
     for (i = 0; i < count; i++) {
         const net_host *h = net_discovery_host(i);
@@ -208,8 +218,8 @@ static void screen_discover(uint32_t pressed)
                 h->a.host_name, ip, (h->a.flags & PSPC_FLAG_PAIRING_OPEN) ? "PIN shown" : "");
     }
     if (count == 0 && !net_discovery_active())
-        ui_text(2, 8, UI_YELLOW, "No PC found. Is companion-host running and the firewall open?");
-    footer("X Pair   O Search again   /\\ Enter IP   START Wi-Fi   HOME Quit");
+        ui_text(2, 8, UI_YELLOW, "No PC found. Is the host running and the firewall open?");
+    footer("X Pair  O Search again  /\\ Enter IP  START Wi-Fi  HOME Quit");
     ui_end();
 }
 
@@ -249,7 +259,7 @@ static void screen_connecting(void)
         g_forget_armed = 0;
         g_msg[0] = '\0';
         g_state = ST_CONNECTED;
-        g_menu_open = 0;
+        menu_close();
         widgets_reset();
         audio_reset();
         voice_reset();
@@ -277,21 +287,6 @@ static void on_message(const uint8_t *m, size_t len)
     if (!widgets_on_message(m, len) && !audio_on_message(m, len) && !deck_on_message(m, len)) voice_on_message(m, len);
 }
 
-enum menu_item { MENU_WIDGETS, MENU_ASSISTANT, MENU_DECK, MENU_SPEAKER, MENU_STATUS, MENU_WIFI, MENU_COUNT };
-
-static const char *menu_label(int item)
-{
-    switch (item) {
-    case MENU_WIDGETS: return "Screen (widgets and macros)";
-    case MENU_ASSISTANT: return "Assistant (hold R to talk)";
-    case MENU_DECK: return "Stream Deck (Bitfocus Companion)";
-    case MENU_STATUS: return "Connection status";
-    case MENU_SPEAKER: return "PC speaker";
-    case MENU_WIFI: return "Wi-Fi network";
-    default: return "";
-    }
-}
-
 /* Hold R to talk; L+R stops a spoken reply (and cancels a recording). */
 static void assistant_screen(uint32_t pressed)
 {
@@ -316,6 +311,7 @@ static void assistant_screen(uint32_t pressed)
 
     ui_begin();
     tv_draw(voice_active() ? voice_level() : -1, voice_seconds());
+    power_draw_badge(UI_WIDTH - 8, 2);
     ui_end();
 }
 
@@ -348,35 +344,44 @@ static void speaker_screen(uint32_t pressed)
     ui_end();
 }
 
+static void apply_menu(menu_action a)
+{
+    switch (a) {
+    case MENU_SCREEN: g_screen = SCR_WIDGETS; break;
+    case MENU_MACROS:
+        g_screen = SCR_WIDGETS;
+        macropad_open();
+        break;
+    case MENU_ASSISTANT: g_screen = SCR_ASSISTANT; break;
+    case MENU_DECK: g_screen = SCR_DECK; break;
+    case MENU_SPEAKER: g_screen = SCR_SPEAKER; break;
+    case MENU_STATUS: g_screen = SCR_STATUS; break;
+    case MENU_WIFI:
+        net_session_close(PSPC_BYE_NORMAL);
+        audio_reset();
+        voice_reset();
+        deck_reset();
+        g_state = ST_WIFI_DIALOG;
+        break;
+    case MENU_FORGET:
+        net_session_close(PSPC_BYE_NORMAL);
+        audio_reset();
+        voice_reset();
+        deck_reset();
+        forget_pairing("Pairing forgotten. Pair again to reconnect.");
+        break;
+    default: break;
+    }
+}
+
 static void menu_screen(uint32_t pressed)
 {
-    int i;
-    if (pressed & PSP_CTRL_UP) g_menu_sel = (g_menu_sel + MENU_COUNT - 1) % MENU_COUNT;
-    if (pressed & PSP_CTRL_DOWN) g_menu_sel = (g_menu_sel + 1) % MENU_COUNT;
-    if (pressed & PSP_CTRL_CIRCLE) g_menu_open = 0;
-    if (pressed & PSP_CTRL_CROSS) {
-        g_menu_open = 0;
-        switch (g_menu_sel) {
-        case MENU_WIDGETS: g_screen = SCR_WIDGETS; break;
-        case MENU_ASSISTANT: g_screen = SCR_ASSISTANT; break;
-        case MENU_DECK: g_screen = SCR_DECK; break;
-        case MENU_STATUS: g_screen = SCR_STATUS; break;
-        case MENU_SPEAKER: g_screen = SCR_SPEAKER; break;
-        case MENU_WIFI:
-            net_session_close(PSPC_BYE_NORMAL);
-            g_state = ST_WIFI_DIALOG;
-            break;
-        default: break;
-        }
-        return;
-    }
+    apply_menu(menu_input(pressed));
+    if (!menu_is_open() || g_state != ST_CONNECTED) return;
     ui_begin();
     header();
-    ui_text(1, 4, UI_WHITE, "Menu");
-    for (i = 0; i < MENU_COUNT; i++)
-        ui_text(3, 6 + i * 2, i == g_menu_sel ? UI_GREEN : UI_WHITE, "%c %s", i == g_menu_sel ? '>' : ' ',
-                menu_label(i));
-    footer("X Select   O Back   START Close   HOME Quit");
+    menu_draw();
+    footer(menu_keys());
     ui_end();
 }
 
@@ -402,12 +407,12 @@ static void screen_connected(uint32_t pressed)
         }
         return;
     }
-    if (pressed & PSP_CTRL_START) {
-        g_menu_open = !g_menu_open;
+    if (!menu_is_open() && (pressed & PSP_CTRL_START)) {
+        menu_open();
         deck_release();
-        return;
+        pressed = 0;
     }
-    if (g_menu_open) {
+    if (menu_is_open()) {
         menu_screen(pressed);
         return;
     }
@@ -417,6 +422,7 @@ static void screen_connected(uint32_t pressed)
         deck_input(pressed, ui_pad_state(), now);
         ui_begin();
         deck_draw(now);
+        power_draw_badge(UI_WIDTH - 8, 2);
         ui_end();
         return;
     }
@@ -433,6 +439,7 @@ static void screen_connected(uint32_t pressed)
         widgets_input(pressed, ui_pad_state(), now);
         ui_begin();
         widgets_draw(now);
+        power_draw_badge(UI_WIDTH - 8, 2);
         ui_end();
         return;
     }
@@ -475,8 +482,8 @@ static void screen_connected(uint32_t pressed)
     ui_text(1, 14, UI_GREY, "Totals     in %s   out %s", tin, tout);
     ui_text(1, 16, UI_WHITE, "Audio UDP  %s   packets %u   dropped %u", s->udp_registered ? "ready" : "registering",
             (unsigned)s->udp_packets, (unsigned)s->udp_dropped);
-    ui_text(1, 17, UI_GREY, "Keepalive  every %u s; data is pushed by the PC only on change", (unsigned)s->keepalive_s);
-    footer("[] Measure RTT   SELECT Forget pairing   START Menu   HOME Quit");
+    ui_text(1, 17, UI_GREY, "Keepalive  every %u s; the PC pushes data only on change", (unsigned)s->keepalive_s);
+    footer("[] RTT now  SELECT x2 Forget pairing  START Menu  HOME Quit");
     ui_end();
 }
 
@@ -540,12 +547,44 @@ static void screen_wifi_reconnect(uint32_t pressed)
     simple_screen(UI_YELLOW, "Wi-Fi dropped. Reconnecting...", wifi_profile_name(), "START Choose network   HOME Quit");
 }
 
+static int nub_moved(const ui_pad *pad)
+{
+    return pad->lx < 128 - 40 || pad->lx > 128 + 40 || pad->ly < 128 - 40 || pad->ly > 128 + 40;
+}
+
+/* Sleep drops the Wi-Fi association and every socket; start over from the remembered profile. */
+static void on_resume(void)
+{
+    switch (g_state) {
+    case ST_CONNECTED:
+        net_session_close(PSPC_BYE_NORMAL);
+        audio_reset();
+        voice_reset();
+        deck_reset();
+        menu_close();
+        break;
+    case ST_DISCOVER:
+    case ST_FIND_HOST:
+        net_discovery_stop();
+        break;
+    case ST_WIFI_DIALOG:
+    case ST_WIFI_WAIT:
+        return;
+    default:
+        break;
+    }
+    set_msg("Woke from sleep; reconnecting.");
+    g_reconnect_started = 0;
+    g_state = ST_WIFI_RECONNECT;
+}
+
 int main(int argc, char *argv[])
 {
     int rc, mic;
     setup_callbacks();
     storage_init(argc > 0 ? argv[0] : NULL);
     ui_init();
+    storage_open();
 
     simple_screen(UI_WHITE, "Starting...", NULL, "");
     mic = rng_init();
@@ -569,6 +608,12 @@ int main(int argc, char *argv[])
 
     while (g_running) {
         uint32_t pressed = ui_poll_pressed();
+        uint64_t now = net_now_us();
+        audio_status a;
+        audio_get_status(&a);
+        power_tick(now, pressed != 0 || nub_moved(ui_pad_state()), a.active || voice_active(),
+                   storage_settings()->cpu_saver, storage_settings()->keep_screen_on);
+        if (power_take_resumed()) on_resume();
         net_stats_tick();
         if ((pressed & PSP_CTRL_START) && (g_state == ST_DISCOVER || g_state == ST_WIFI_WAIT)) {
             net_discovery_stop();

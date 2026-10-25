@@ -179,7 +179,7 @@ void deck_draw(uint64_t now_us)
                                : "Waiting for the PC...");
         return;
     }
-    gfx_text(150, 2, GFX_DIM, "X press  L/R page  \xE2\x96\xB3 macros  START menu", 0);
+    gfx_text(100, 2, GFX_DIM, "X press  L/R page  \xE2\x96\xB3 macros  START menu", 0);
     for (k = 0; k < keys; k++) {
         int x = (k % g_cols) * cw, y = TOP + (k / g_cols) * ch, slot = find(g_key_image[k]);
         uint32_t frame = k == g_held ? GFX_TEXT : k == g_sel ? GFX_ACCENT : 0xFF202020;

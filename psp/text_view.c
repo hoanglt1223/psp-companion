@@ -129,7 +129,7 @@ void tv_draw(int level, int recording_seconds)
 
     gfx_fill(0, 0, UI_WIDTH, UI_HEIGHT, GFX_BG);
     gfx_text(8, 2, GFX_ACCENT, "Assistant", 0);
-    gfx_text(150, 2, GFX_DIM, "R talk  L+R stop  UP/DOWN scroll  O back", 0);
+    gfx_text(92, 2, GFX_DIM, "R talk  L+R stop  UP/DOWN scroll  O back", 0);
     if (g_count == 0) gfx_wrap(TEXT_X, TOP + 8, TEXT_W, 4, GFX_DIM, "Ask anything in Vietnamese or English.");
     for (i = 0; i < VISIBLE && first + i < n; i++) {
         const line *l = &g_lines[first + i];

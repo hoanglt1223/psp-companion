@@ -318,7 +318,8 @@ void widgets_draw(uint64_t now_us)
     snprintf(head, sizeof head, "%s", g_layout.pages[g_page]);
     gfx_text(8, 2, GFX_ACCENT, head, 200);
     snprintf(head, sizeof head, "%d/%d  L/R page  \xE2\x96\xB3 macros  START menu", g_page + 1, g_layout.page_count);
-    gfx_text(UI_WIDTH - 8 - font_text_width(head), 2, GFX_DIM, head, 0);
+    /* Leaves room for the battery badge drawn by main.c. */
+    gfx_text(UI_WIDTH - 72 - font_text_width(head), 2, GFX_DIM, head, 0);
     for (i = 0; i < g_layout.widget_count; i++)
         if (g_layout.widgets[i].page == g_page) draw_widget(i, now_us);
     cursor_draw();
