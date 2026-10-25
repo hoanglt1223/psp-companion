@@ -1,0 +1,22 @@
+# systemd user unit: starts companion-host when you log in.
+# Installed by install.sh to ~/.config/systemd/user/; manage with
+#   systemctl --user {start,stop,status} companion-host
+#   journalctl --user -u companion-host -f
+[Unit]
+Description=PSP Companion host
+Documentation=https://github.com/hoanglt1223/psp-companion/blob/main/docs/user/INSTALL.md
+After=network-online.target pipewire-pulse.service pulseaudio.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/companion-host --headless
+# Put ANTHROPIC_API_KEY=... (and other KEY=value lines) here; the file is optional.
+EnvironmentFile=-%h/.config/psp-companion/env
+# The PC speaker captures this PulseAudio/PipeWire source when [audio] speaker_device = "pulse".
+Environment=PULSE_SOURCE=@DEFAULT_MONITOR@
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
